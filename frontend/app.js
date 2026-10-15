@@ -167,12 +167,14 @@ function updateSpinButton() {
     btn.textContent = isSpinning ? 'Крутится...' : 'Крутить';
 }
 
+let pendingSpinKey = null;
+
 async function spin() {
     if (isSpinning) return;
     isSpinning = true;
     updateSpinButton();
 
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = pendingSpinKey || crypto.randomUUID();
 
     try {
         const response = await api('/spins', {
@@ -182,6 +184,7 @@ async function spin() {
         const result = await response.json();
 
         if (response.ok) {
+            pendingSpinKey = null;
             await animateWheel(result.segment_id, result.content_item_id);
             showResult(result);
             loadBalances();
@@ -190,7 +193,8 @@ async function spin() {
         }
     } catch (e) {
         console.error('Spin failed:', e);
-        alert('Ошибка соединения');
+        pendingSpinKey = idempotencyKey;
+        alert('Ошибка соединения. Повторите попытку.');
     } finally {
         isSpinning = false;
         updateSpinButton();
@@ -223,10 +227,7 @@ function animateWheel(targetSegmentId, targetContentItemId) {
         targetAngle += (segments[targetIndex].weight / totalWeight) * Math.PI;
 
         const pointerAngle = -Math.PI / 2;
-        const finalModAngle = ((targetAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-        const pointerModAngle = ((pointerAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-        let correction = pointerModAngle - finalModAngle;
-        if (correction < 0) correction += Math.PI * 2;
+        const correction = ((-targetAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 
         const totalRotation = Math.PI * 2 * 5 + correction;
         const duration = 4000;
@@ -388,14 +389,18 @@ async function loadShop() {
     }
 }
 
+const pendingPurchaseKeys = {};
+
 async function buyPackage(packageId) {
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = pendingPurchaseKeys[packageId] || crypto.randomUUID();
+
     try {
         const response = await api('/spin-purchases', {
             method: 'POST',
             body: JSON.stringify({ package_id: packageId, idempotency_key: idempotencyKey }),
         });
         if (response.ok) {
+            pendingPurchaseKeys[packageId] = null;
             alert('Пакет куплен!');
             loadBalances();
         } else {
@@ -403,7 +408,8 @@ async function buyPackage(packageId) {
             alert(data.detail || 'Ошибка');
         }
     } catch (e) {
-        alert('Ошибка соединения');
+        pendingPurchaseKeys[packageId] = idempotencyKey;
+        alert('Ошибка соединения. Повторите попытку.');
     }
 }
 
@@ -445,11 +451,25 @@ async function loadAdminContent() {
         data.items.forEach(item => {
             const div = document.createElement('div');
             div.className = 'admin-card';
-            div.innerHTML = `<h3>${item.title}</h3><p>${item.status} | ${item.media_type}</p>`;
+            div.innerHTML = `<h3>${item.title}</h3><p>${item.status} | ${item.media_type}</p>` +
+                (item.status === 'draft' ? `<button class="btn btn-secondary" onclick="publishContent(${item.id})">Опубликовать</button>` : '');
             container.appendChild(div);
         });
     } catch (e) {
         console.error('Failed to load admin content:', e);
+    }
+}
+
+async function publishContent(contentId) {
+    try {
+        await api(`/admin/content/${contentId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'published' }),
+        });
+        alert('Опубликовано');
+        loadAdminContent();
+    } catch (e) {
+        alert('Ошибка: ' + (e.message || 'не удалось'));
     }
 }
 
@@ -480,7 +500,42 @@ async function loadAdminWheel() {
         container.innerHTML = '<h3>Создать колесо</h3>' +
             '<input type="text" id="wheel-name" placeholder="Название">' +
             '<button class="btn btn-primary" onclick="createWheel()">Создать</button>' +
+            '<h3 style="margin-top:20px">Сектора активного колеса</h3>' +
+            '<div id="wheel-segments"></div>' +
+            '<h3>Добавить сектор</h3>' +
+            '<select id="segment-content-item"></select>' +
+            '<input type="text" id="segment-label" placeholder="Подпись">' +
+            '<input type="number" id="segment-weight" placeholder="Вес" value="1" min="1">' +
+            '<input type="number" id="segment-position" placeholder="Позиция" value="0">' +
+            '<button class="btn btn-primary" onclick="addSegment()">Добавить</button>' +
             '<h3 style="margin-top:20px">Колеса</h3>';
+
+        const wheel = wheels.wheels.find(w => w.status === 'active');
+        if (wheel) {
+            const resp = await fetch(`/api/v1/wheel`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (resp.ok) {
+                const data = await resp.json();
+                const segContainer = document.getElementById('wheel-segments');
+                segContainer.innerHTML = '';
+                data.segments.forEach(seg => {
+                    const div = document.createElement('div');
+                    div.className = 'admin-card';
+                    div.innerHTML = `<p><strong>${seg.label}</p><p>Вес: ${seg.weight} | Позиция: ${seg.content_item_id}</p>`;
+                    segContainer.appendChild(div);
+                });
+            }
+        }
+
+        const contentResp = await api('/admin/content');
+        const contentData = await contentResp.json();
+        const select = document.getElementById('segment-content-item');
+        select.innerHTML = '';
+        contentData.items.forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.id;
+            opt.textContent = item.title;
+            select.appendChild(opt);
+        });
 
         wheels.wheels.forEach(w => {
             const div = document.createElement('div');
@@ -490,6 +545,129 @@ async function loadAdminWheel() {
         });
     } catch (e) {
         console.error('Failed to load admin wheel:', e);
+    }
+}
+
+async function addSegment() {
+    const content_item_id = parseInt(document.getElementById('segment-content-item').value);
+    const label = document.getElementById('segment-label').value;
+    const weight = parseInt(document.getElementById('segment-weight').value);
+    const position = parseInt(document.getElementById('segment-position').value);
+
+    try {
+        const wheelsResponse = await api('/admin/wheels');
+        const wheels = await wheelsResponse.json();
+        const wheel = wheels.wheels.find(w => w.status === 'active');
+        if (!wheel) { alert('Нет активного колеса'); return; }
+
+        await api(`/admin/wheels/${wheel.id}/segments`, {
+            method: 'PUT',
+            body: JSON.stringify({ segments: [{ content_item_id, label, weight, position }] }),
+        });
+        alert('Сектор добавлен');
+        loadAdminWheel();
+    } catch (e) {
+        alert('Ошибка');
+    }
+}
+
+async function loadAdminMedia() {
+    try {
+        const resp = await api('/admin/media');
+        const data = await resp.json();
+        const container = document.getElementById('admin-media');
+        container.innerHTML = '<h3>Загрузить медиа</h3>' +
+            '<select id="media-content-item"></select>' +
+            '<select id="media-role"><option value="preview">Превью</option><option value="main">Основное</option></select>' +
+            '<input type="file" id="media-file">' +
+            '<button class="btn btn-primary" onclick="uploadMedia()">Загрузить</button>' +
+            '<h3 style="margin-top:20px">Медиатека</h3>';
+
+        const contentResp = await api('/admin/content');
+        const contentData = await contentResp.json();
+        const select = document.getElementById('media-content-item');
+        select.innerHTML = '';
+        contentData.items.forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.id;
+            opt.textContent = item.title;
+            select.appendChild(opt);
+        });
+
+        data.items.forEach(m => {
+            const div = document.createElement('div');
+            div.className = 'admin-card';
+            div.innerHTML = `<p>${m.file_name || 'Без имени'} | ${m.file_type} | ${m.file_size} bytes</p>`;
+            container.appendChild(div);
+        });
+    } catch (e) {
+        console.error('Failed to load media:', e);
+    }
+}
+
+async function uploadMedia() {
+    const content_item_id = document.getElementById('media-content-item').value;
+    const role = document.getElementById('media-role').value;
+    const fileInput = document.getElementById('media-file');
+    if (!fileInput.files.length) { alert('Выберите файл'); return; }
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('content_item_id', content_item_id);
+    formData.append('role', role);
+
+    try {
+        const response = await fetch('/api/v1/admin/media/upload', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData,
+        });
+        if (response.ok) {
+            alert('Загружено');
+            loadAdminMedia();
+        } else {
+            alert('Ошибка загрузки');
+        }
+    } catch (e) {
+        alert('Ошибка');
+    }
+}
+
+async function loadAdminWelcomePool() {
+    try {
+        const resp = await api('/admin/welcome-pool');
+        const data = await resp.json();
+        const container = document.getElementById('admin-welcome-pool');
+        container.innerHTML = '<h3>Приветственный пул</h3><select id="welcome-item-select" multiple size="5"></select>' +
+            '<button class="btn btn-primary" onclick="saveWelcomePool()">Сохранить</button>';
+
+        const contentResp = await api('/admin/content');
+        const contentData = await contentResp.json();
+        const select = document.getElementById('welcome-item-select');
+        select.innerHTML = '';
+        contentData.items.filter(i => i.status === 'published').forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.id;
+            opt.textContent = item.title;
+            if (data.items.find(w => w.content_item_id === item.id)) opt.selected = true;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load welcome pool:', e);
+    }
+}
+
+async function saveWelcomePool() {
+    const select = document.getElementById('welcome-item-select');
+    const ids = Array.from(select.selectedOptions).map(o => parseInt(o.value));
+    try {
+        await api('/admin/welcome-pool', {
+            method: 'PUT',
+            body: JSON.stringify({ content_item_ids: ids }),
+        });
+        alert('Сохранено');
+    } catch (e) {
+        alert('Ошибка');
     }
 }
 
@@ -601,11 +779,13 @@ function showAdminTab(tab) {
     if (tab === 'dashboard') loadAdminDashboard();
     else if (tab === 'content') loadAdminContent();
     else if (tab === 'wheel') loadAdminWheel();
+    else if (tab === 'media') loadAdminMedia();
+    else if (tab === 'welcome') loadAdminWelcomePool();
     else if (tab === 'users') loadAdminUsers();
     else if (tab === 'packages') loadAdminPackages();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     token = getStoredToken();
 
     if (token) {
@@ -618,7 +798,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showLogin();
         }
     } else if (tg?.initData) {
-        auth();
+        await auth();
     } else {
         showLogin();
     }

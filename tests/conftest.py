@@ -45,3 +45,29 @@ async def client(engine):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def concurrent_engine():
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def concurrent_client(concurrent_engine):
+    async_session_factory = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def override_get_session():
+        async with async_session_factory() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_get_session
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()

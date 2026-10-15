@@ -369,18 +369,37 @@ async def update_wheel_segments(
                     WheelSegment.__table__.delete().where(WheelSegment.id == seg_id)
                 )
 
+    temp_offset = 10000
+    for i, seg_data in enumerate(request.segments):
+        await session.execute(
+            update(WheelSegment)
+            .where(WheelSegment.wheel_id == wheel_id)
+            .values(position=WheelSegment.position + temp_offset + i)
+        )
+
     for seg_data in request.segments:
         seg_id = seg_data.get("segment_id")
         if seg_id is not None:
-            await session.execute(
-                update(WheelSegment).where(WheelSegment.id == seg_id).values(
+            seg = existing_segments.get(seg_id)
+            if seg and seg.id in used_segment_ids:
+                await session.execute(
+                    update(WheelSegment).where(WheelSegment.id == seg_id).values(
+                        label=seg_data["label"],
+                        weight=seg_data["weight"],
+                        is_active=seg_data.get("is_active", True),
+                        position=seg_data["position"],
+                    )
+                )
+            else:
+                new_seg = WheelSegment(
+                    wheel_id=wheel_id,
                     content_item_id=seg_data["content_item_id"],
                     label=seg_data["label"],
                     weight=seg_data["weight"],
                     is_active=seg_data.get("is_active", True),
                     position=seg_data["position"],
                 )
-            )
+                session.add(new_seg)
         else:
             segment = WheelSegment(
                 wheel_id=wheel_id,
@@ -391,6 +410,8 @@ async def update_wheel_segments(
                 position=seg_data["position"],
             )
             session.add(segment)
+
+    await session.flush()
 
     await session.commit()
     return {"updated": True}

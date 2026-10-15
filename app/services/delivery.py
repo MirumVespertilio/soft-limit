@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import update
 from app.models.delivery import MediaDelivery, DeliveryStatus
 from app.models.inventory import UserInventory
 from app.models.content import ContentItem, ContentItemMedia, MediaAsset, MediaType, FileRole
@@ -82,12 +83,23 @@ async def execute_delivery(
     bot,
     delivery_id: int,
 ) -> MediaDelivery:
+    capture_result = await session.execute(
+        update(MediaDelivery)
+        .where(
+            MediaDelivery.id == delivery_id,
+            MediaDelivery.status == DeliveryStatus.PENDING,
+        )
+        .values(status="processing")
+    )
+    if capture_result.rowcount == 0:
+        existing = await session.get(MediaDelivery, delivery_id)
+        if existing and existing.status == DeliveryStatus.SENT:
+            return existing
+        return existing
+
     delivery = await session.get(MediaDelivery, delivery_id)
     if not delivery:
         raise ValueError("Delivery not found")
-
-    if delivery.status == DeliveryStatus.SENT:
-        return delivery
 
     asset = await session.get(MediaAsset, delivery.media_asset_id)
     if not asset:

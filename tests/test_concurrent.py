@@ -6,8 +6,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from unittest.mock import AsyncMock, patch
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy import select
 
 from app.models.user import User
@@ -45,143 +45,106 @@ async def _setup_wheel(session):
     return item1.id
 
 
-async def _make_engine():
-    engine = create_async_engine("sqlite+aiosqlite:///./test.db", echo=False)
-    async with engine.begin() as conn:
-        from app.db import Base
-        await conn.run_sync(Base.metadata.create_all)
-    return engine
-
-
-async def _do_spin_request(engine, token, idem_key):
-    from app.main import app
-    from app.db import get_session as orig_get_session
-
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async def override_get_session():
-        async with async_session() as s:
-            yield s
-
-    app.dependency_overrides[orig_get_session] = override_get_session
-    try:
-        from httpx import AsyncClient, ASGITransport
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            return await c.post(
-                "/api/v1/spins",
-                json={"idempotency_key": idem_key},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-    finally:
-        app.dependency_overrides.pop(orig_get_session, None)
-
-
-async def _do_purchase_request(engine, token, package_id, idem_key):
-    from app.main import app
-    from app.db import get_session as orig_get_session
-
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async def override_get_session():
-        async with async_session() as s:
-            yield s
-
-    app.dependency_overrides[orig_get_session] = override_get_session
-    try:
-        from httpx import AsyncClient, ASGITransport
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            return await c.post(
-                "/api/v1/spin-purchases",
-                json={"package_id": package_id, "idempotency_key": idem_key},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-    finally:
-        app.dependency_overrides.pop(orig_get_session, None)
-
-
 @pytest.mark.asyncio
-async def test_real_concurrent_spins(client, session):
+async def test_real_concurrent_spins(concurrent_client, concurrent_engine):
+    client = concurrent_client
     token = await _create_user(client, 555555)
-    item_id = await _setup_wheel(session)
-    session.add(WelcomeRewardItem(content_item_id=item_id))
-    await session.commit()
+
+    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        item_id = await _setup_wheel(session)
+        session.add(WelcomeRewardItem(content_item_id=item_id))
+        await session.commit()
 
     await client.post("/api/v1/spins", json={"idempotency_key": "p0"}, headers={"Authorization": f"Bearer {token}"})
 
-    wallet = await session.execute(select(UserWallet))
-    wallet.scalars().first().spins_balance = 5
-    await session.commit()
+    async with async_session() as session:
+        wallet = await session.execute(select(UserWallet))
+        wallet.scalars().first().spins_balance = 5
+        await session.commit()
 
-    engine = await _make_engine()
+    async def do_spin(i):
+        return await client.post(
+            "/api/v1/spins",
+            json={"idempotency_key": f"conc-{i}"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
-    responses = await asyncio.gather(*[
-        _do_spin_request(engine, token, f"conc-{i}")
-        for i in range(5)
-    ], return_exceptions=True)
+    responses = await asyncio.gather(*[do_spin(i) for i in range(5)], return_exceptions=True)
 
     success_count = sum(1 for r in responses if hasattr(r, 'status_code') and r.status_code == 200)
     assert success_count == 5
 
-    spins = await session.execute(select(Spin))
-    assert len(spins.scalars().all()) == 6
+    async with async_session() as session:
+        spins = await session.execute(select(Spin))
+        assert len(spins.scalars().all()) == 6
 
 
 @pytest.mark.asyncio
-async def test_real_concurrent_purchases(client, session):
+async def test_real_concurrent_purchases(concurrent_client, concurrent_engine):
+    client = concurrent_client
     token = await _create_user(client, 666666)
-    item_id = await _setup_wheel(session)
-    session.add(WelcomeRewardItem(content_item_id=item_id))
-    session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
-    await session.commit()
 
-    wallet = await session.execute(select(UserWallet))
-    wallet.scalars().first().test_stars_balance = 5
-    await session.commit()
+    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        item_id = await _setup_wheel(session)
+        session.add(WelcomeRewardItem(content_item_id=item_id))
+        session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
+        await session.commit()
 
-    pkg = await session.execute(select(SpinPackage))
-    package_id = pkg.scalars().first().id
+        wallet = await session.execute(select(UserWallet))
+        wallet.scalars().first().test_stars_balance = 5
+        await session.commit()
 
-    engine = await _make_engine()
+        pkg = await session.execute(select(SpinPackage))
+        package_id = pkg.scalars().first().id
 
-    responses = await asyncio.gather(*[
-        _do_purchase_request(engine, token, package_id, f"cp-{i}")
-        for i in range(3)
-    ], return_exceptions=True)
+    async def do_purchase(i):
+        return await client.post(
+            "/api/v1/spin-purchases",
+            json={"package_id": package_id, "idempotency_key": f"cp-{i}"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    responses = await asyncio.gather(*[do_purchase(i) for i in range(3)], return_exceptions=True)
 
     success_count = sum(1 for r in responses if hasattr(r, 'status_code') and r.status_code == 200)
     assert success_count == 1
 
 
 @patch("aiogram.Bot")
-async def test_delivery_bot_called_once(mock_bot_cls, client, session):
+async def test_delivery_bot_called_once(mock_bot_cls, concurrent_client, concurrent_engine):
+    client = concurrent_client
     mock_bot = AsyncMock()
     mock_bot.session = AsyncMock()
     mock_bot_cls.return_value = mock_bot
 
     token = await _create_user(client, 777777)
-    item_id = await _setup_wheel(session)
-    session.add(WelcomeRewardItem(content_item_id=item_id))
-    await session.flush()
 
-    asset = MediaAsset(
-        file_type=MediaType.PHOTO,
-        telegram_file_id="test_file_id",
-        telegram_file_unique_id="test_unique_id",
-        mime_type="image/jpeg",
-        file_size=1024,
-    )
-    session.add(asset)
-    await session.flush()
+    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        item_id = await _setup_wheel(session)
+        session.add(WelcomeRewardItem(content_item_id=item_id))
+        await session.flush()
 
-    session.add(ContentItemMedia(content_item_id=item_id, media_asset_id=asset.id, role=FileRole.ORIGINAL))
-    await session.commit()
+        asset = MediaAsset(
+            file_type=MediaType.PHOTO,
+            telegram_file_id="test_file_id",
+            telegram_file_unique_id="test_unique_id",
+            mime_type="image/jpeg",
+            file_size=1024,
+        )
+        session.add(asset)
+        await session.flush()
+
+        session.add(ContentItemMedia(content_item_id=item_id, media_asset_id=asset.id, role=FileRole.ORIGINAL))
+        await session.commit()
 
     await client.post("/api/v1/spins", json={"idempotency_key": "d1"}, headers={"Authorization": f"Bearer {token}"})
 
-    inv = await session.execute(select(UserInventory))
-    inv_id = inv.scalars().first().id
+    async with async_session() as session:
+        inv = await session.execute(select(UserInventory))
+        inv_id = inv.scalars().first().id
 
     await client.post(f"/api/v1/inventory/{inv_id}/deliver", headers={"Authorization": f"Bearer {token}"})
     await client.post(f"/api/v1/inventory/{inv_id}/deliver", headers={"Authorization": f"Bearer {token}"})
