@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user_id
 from app.db import get_session
-from app.services.delivery import request_delivery, get_delivery_status
+from app.services.delivery import request_delivery, get_delivery_status, execute_delivery
 from app.models.delivery import DeliveryStatus
 
 router = APIRouter(prefix="/api/v1", tags=["delivery"])
@@ -20,6 +20,11 @@ async def deliver_item(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    from aiogram import Bot
+    from app.config import settings
+    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+
+    delivery = await execute_delivery(session, bot, delivery.id)
     await session.commit()
 
     return {

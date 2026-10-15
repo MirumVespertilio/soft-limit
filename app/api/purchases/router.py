@@ -1,5 +1,3 @@
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -8,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user_id
 from app.db import get_session
 from app.models.purchases import SpinPackage, SpinPurchase
-from app.models.wallet import TransactionResource
+from app.models.wallet import TransactionResource, TransactionReason
 from app.services.wallet import adjust_balance, InsufficientBalanceError
 
 router = APIRouter(prefix="/api/v1", tags=["purchases"])
@@ -38,7 +36,7 @@ async def list_packages(
 
 class PurchaseRequest(BaseModel):
     package_id: int
-    idempotency_key: str | None = None
+    idempotency_key: str
 
 
 class PurchaseResponse(BaseModel):
@@ -53,7 +51,7 @@ async def purchase_package(
     user_id: int = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    idem_key = request.idempotency_key or str(uuid.uuid4())
+    idem_key = request.idempotency_key
 
     existing = await session.execute(
         select(SpinPurchase).where(

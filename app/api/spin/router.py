@@ -1,3 +1,4 @@
+import random
 import uuid
 from datetime import datetime, timezone
 
@@ -13,7 +14,7 @@ from app.models.wheel import WheelSegment
 from app.models.spin import Spin, SpinType
 from app.models.content import ContentItem
 from app.models.inventory import UserInventory, InventorySource
-from app.models.wallet import TransactionResource
+from app.models.wallet import TransactionResource, TransactionReason
 from app.services.wallet import adjust_balance, InsufficientBalanceError, get_wallet_by_user_id
 from app.services.wheel import get_active_wheel, get_active_segments, weighted_random_choice
 from app.models.welcome import WelcomeRewardItem
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/api/v1", tags=["spin"])
 
 
 class SpinRequest(BaseModel):
-    idempotency_key: str | None = None
+    idempotency_key: str
 
 
 class SpinResponse(BaseModel):
@@ -41,7 +42,7 @@ async def create_spin(
     user_id: int = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    idem_key = request.idempotency_key or str(uuid.uuid4())
+    idem_key = request.idempotency_key
 
     existing = await session.execute(
         select(Spin).where(Spin.user_id == user_id, Spin.idempotency_key == idem_key)
@@ -67,12 +68,14 @@ async def create_spin(
 
     if is_welcome:
         pool_result = await session.execute(
-            select(WelcomeRewardItem).order_by(WelcomeRewardItem.position)
+            select(WelcomeRewardItem, ContentItem)
+            .join(ContentItem, WelcomeRewardItem.content_item_id == ContentItem.id)
+            .order_by(WelcomeRewardItem.position)
         )
-        pool = pool_result.scalars().all()
+        pool = pool_result.all()
         if not pool:
             raise HTTPException(status_code=400, detail="No welcome rewards configured")
-        chosen_item = random.choice(pool)
+        chosen_item = random.choice(pool)[1]
         segment = None
         spin_type = SpinType.WELCOME
     else:

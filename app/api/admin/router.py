@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
@@ -288,24 +288,54 @@ async def update_wheel_segments(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.models.spin import Spin
+
     wheel = await session.get(Wheel, wheel_id)
     if not wheel:
         raise HTTPException(status_code=404, detail="Wheel not found")
 
+    used_result = await session.execute(
+        select(WheelSegment.id).join(Spin, Spin.segment_id == WheelSegment.id).where(
+            WheelSegment.wheel_id == wheel_id
+        ).distinct()
+    )
+    used_segment_ids = {row[0] for row in used_result.all()}
+
+    new_segment_ids = {s["segment_id"] for s in request.segments if "segment_id" in s}
+    segments_to_deactivate = used_segment_ids - new_segment_ids
+
     await session.execute(
-        WheelSegment.__table__.delete().where(WheelSegment.wheel_id == wheel_id)
+        WheelSegment.__table__.delete().where(
+            WheelSegment.wheel_id == wheel_id,
+            WheelSegment.id.notin_(segments_to_deactivate) if segments_to_deactivate else True,
+        )
     )
 
-    for seg_data in request.segments:
-        segment = WheelSegment(
-            wheel_id=wheel_id,
-            content_item_id=seg_data["content_item_id"],
-            label=seg_data["label"],
-            weight=seg_data["weight"],
-            is_active=seg_data.get("is_active", True),
-            position=seg_data["position"],
+    for seg in segments_to_deactivate:
+        await session.execute(
+            update(WheelSegment).where(WheelSegment.id == seg).values(is_active=False)
         )
-        session.add(segment)
+
+    for seg_data in request.segments:
+        if "segment_id" in seg_data:
+            await session.execute(
+                update(WheelSegment).where(WheelSegment.id == seg_data["segment_id"]).values(
+                    label=seg_data["label"],
+                    weight=seg_data["weight"],
+                    is_active=seg_data.get("is_active", True),
+                    position=seg_data["position"],
+                )
+            )
+        else:
+            segment = WheelSegment(
+                wheel_id=wheel_id,
+                content_item_id=seg_data["content_item_id"],
+                label=seg_data["label"],
+                weight=seg_data["weight"],
+                is_active=seg_data.get("is_active", True),
+                position=seg_data["position"],
+            )
+            session.add(segment)
 
     await session.commit()
     return {"updated": True}

@@ -148,7 +148,6 @@ def upgrade() -> None:
     sa.CheckConstraint('test_stars_balance >= 0', name='ck_user_wallets_test_stars_non_negative'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('user_id'),
     sa.UniqueConstraint('user_id')
     )
     op.create_table('welcome_reward_items',

@@ -3,7 +3,7 @@ import hmac
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import unquote, parse_qsl
+from urllib.parse import parse_qsl
 
 import jwt
 from fastapi import HTTPException
@@ -12,7 +12,7 @@ from app.config import settings
 
 
 def verify_telegram_init_data(init_data: str) -> dict:
-    params = dict(parse_qsl(unquote(init_data)))
+    params = dict(parse_qsl(init_data, keep_blank_values=True))
     received_hash = params.pop("hash", "")
     if not received_hash:
         raise HTTPException(status_code=401, detail="Missing hash")
@@ -24,12 +24,20 @@ def verify_telegram_init_data(init_data: str) -> dict:
     if not hmac.compare_digest(computed_hash, received_hash):
         raise HTTPException(status_code=401, detail="Invalid hash")
 
-    auth_date = int(params.get("auth_date", 0))
+    try:
+        auth_date = int(params.get("auth_date", 0))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid auth_date")
+
     if time.time() - auth_date > 86400:
         raise HTTPException(status_code=401, detail="Init data expired")
 
     user_json = params.get("user", "{}")
-    user_data = json.loads(user_json)
+    try:
+        user_data = json.loads(user_json)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=401, detail="Invalid user data")
+
     user_data["auth_date"] = auth_date
     return user_data
 

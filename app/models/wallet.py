@@ -30,7 +30,6 @@ class UserWallet(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint("user_id"),
         CheckConstraint("test_stars_balance >= 0", name="ck_user_wallets_test_stars_non_negative"),
         CheckConstraint("spins_balance >= 0", name="ck_user_wallets_spins_non_negative"),
     )

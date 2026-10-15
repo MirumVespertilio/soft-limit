@@ -1,10 +1,12 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.delivery import MediaDelivery, DeliveryStatus
 from app.models.inventory import UserInventory
-from app.models.content import ContentItem, ContentItemMedia
-from app.models.content import MediaType
+from app.models.content import ContentItem, ContentItemMedia, MediaAsset, MediaType
+from app.models.user import User
 
 
 async def request_delivery(
@@ -58,3 +60,44 @@ async def get_delivery_status(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def execute_delivery(
+    session: AsyncSession,
+    bot,
+    delivery_id: int,
+) -> MediaDelivery:
+    delivery = await session.get(MediaDelivery, delivery_id)
+    if not delivery:
+        raise ValueError("Delivery not found")
+
+    asset = await session.get(MediaAsset, delivery.media_asset_id)
+    if not asset:
+        raise ValueError("Media asset not found")
+
+    user_result = await session.execute(select(User).where(User.id == delivery.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise ValueError("User not found")
+
+    delivery.attempts += 1
+    delivery.last_attempt_at = datetime.now(timezone.utc)
+
+    try:
+        if asset.file_type == MediaType.PHOTO:
+            await bot.send_photo(
+                chat_id=user.telegram_id,
+                photo=asset.telegram_file_id,
+            )
+        elif asset.file_type == MediaType.VIDEO:
+            await bot.send_video(
+                chat_id=user.telegram_id,
+                video=asset.telegram_file_id,
+            )
+        delivery.status = DeliveryStatus.SENT
+    except Exception as e:
+        delivery.status = DeliveryStatus.FAILED
+        delivery.last_error = str(e)
+
+    await session.flush()
+    return delivery
