@@ -37,15 +37,24 @@ async def request_delivery(
     )
     media_links = inv_result.scalars().all()
 
-    original_link = next((m for m in media_links if m.role == FileRole.ORIGINAL), None)
-    if not original_link:
-        original_link = next((m for m in media_links if m.role == FileRole.MAIN), None)
-    if not original_link:
-        raise ValueError("No original media found for this inventory item")
+    # MAIN is the explicitly selected deliverable. Choose the latest MAIN link
+    # if old data contains duplicates. Older uploads could attach a preview as
+    # ORIGINAL too, so exclude any ORIGINAL link whose asset is also a PREVIEW.
+    main_links = [m for m in media_links if m.role == FileRole.MAIN]
+    main_link = max(main_links, key=lambda m: m.id, default=None)
+    preview_asset_ids = {m.media_asset_id for m in media_links if m.role == FileRole.PREVIEW}
+    original_links = [
+        m for m in media_links
+        if m.role == FileRole.ORIGINAL and m.media_asset_id not in preview_asset_ids
+    ]
+    original_link = max(original_links, key=lambda m: m.id, default=None)
+    selected_link = main_link or original_link
+    if not selected_link:
+        raise ValueError("No original/main media found for this inventory item")
 
     delivery = MediaDelivery(
         user_id=user_id,
-        media_asset_id=original_link.media_asset_id,
+        media_asset_id=selected_link.media_asset_id,
         inventory_id=inventory_id,
         status=DeliveryStatus.PENDING,
     )

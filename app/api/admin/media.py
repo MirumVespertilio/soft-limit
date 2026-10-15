@@ -150,28 +150,40 @@ async def upload_media(
     await session.flush()
 
     # Always retain the uploaded file as ORIGINAL so delivery can send it.
-    link = ContentItemMedia(
-        content_item_id=content_item_id,
-        media_asset_id=asset.id,
-        role=FileRole.ORIGINAL,
-    )
-    session.add(link)
-
-    # MAIN and PREVIEW are explicit display roles. Keep only one link for each
-    # singleton role so the API never silently displays a stale previous file.
-    if role in (FileRole.MAIN, FileRole.PREVIEW):
+    # A PREVIEW upload is display-only: never mark that same asset ORIGINAL,
+    # otherwise the delivery flow could hand the preview to the user.
+    if role == FileRole.PREVIEW:
         await session.execute(
             delete(ContentItemMedia).where(
                 ContentItemMedia.content_item_id == content_item_id,
-                ContentItemMedia.role == role,
+                ContentItemMedia.role == FileRole.PREVIEW,
             )
         )
         session.add(ContentItemMedia(
             content_item_id=content_item_id,
             media_asset_id=asset.id,
-            role=role,
+            role=FileRole.PREVIEW,
             position=0,
         ))
+    else:
+        session.add(ContentItemMedia(
+            content_item_id=content_item_id,
+            media_asset_id=asset.id,
+            role=FileRole.ORIGINAL,
+        ))
+        if role == FileRole.MAIN:
+            await session.execute(
+                delete(ContentItemMedia).where(
+                    ContentItemMedia.content_item_id == content_item_id,
+                    ContentItemMedia.role == FileRole.MAIN,
+                )
+            )
+            session.add(ContentItemMedia(
+                content_item_id=content_item_id,
+                media_asset_id=asset.id,
+                role=FileRole.MAIN,
+                position=0,
+            ))
 
     if file_type == MediaType.PHOTO and prev_file_id and role != FileRole.PREVIEW:
         existing_preview = await session.execute(

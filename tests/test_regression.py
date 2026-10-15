@@ -26,8 +26,8 @@ async def _create_admin_user(client, session, engine) -> str:
         return response.json()["access_token"]
 
 
-async def _create_content(session, title="Test Card"):
-    item = ContentItem(title=title, status=ContentStatus.PUBLISHED, media_type=MediaType.PHOTO)
+async def _create_content(session, title="Test Card", status=ContentStatus.PUBLISHED):
+    item = ContentItem(title=title, status=status, media_type=MediaType.PHOTO)
     session.add(item)
     await session.flush()
     return item.id
@@ -136,6 +136,7 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
                     data={"content_item_id": str(cid), "role": "preview"},
                 )
                 assert r.status_code == 200
+                preview_asset_id = r.json()["media_asset_id"]
                 r_main = await c.post(
                     "/api/v1/admin/media/upload",
                     headers={"Authorization": f"Bearer {admin_token}"},
@@ -143,6 +144,7 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
                     data={"content_item_id": str(cid), "role": "main"},
                 )
                 assert r_main.status_code == 200
+                main_asset_id = r_main.json()["media_asset_id"]
 
         result = await session.execute(
             select(ContentItemMedia).where(ContentItemMedia.content_item_id == cid)
@@ -152,3 +154,68 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
         assert FileRole.ORIGINAL in roles
         assert FileRole.PREVIEW in roles
         assert FileRole.MAIN in roles
+
+        roles_by_asset = {}
+        for link in links:
+            roles_by_asset.setdefault(link.media_asset_id, set()).add(link.role)
+        assert FileRole.PREVIEW in roles_by_asset[preview_asset_id]
+        assert FileRole.ORIGINAL not in roles_by_asset[preview_asset_id]
+        assert FileRole.MAIN in roles_by_asset[main_asset_id]
+        assert FileRole.ORIGINAL in roles_by_asset[main_asset_id]
+
+        # Delivery must choose the explicit MAIN asset, not the preview.
+        from app.models.user import User
+        from app.models.inventory import UserInventory, InventorySource
+        from app.services.delivery import request_delivery
+
+        owner = await session.scalar(select(User).where(User.telegram_id == 999999))
+        assert owner is not None
+        inventory = UserInventory(
+            user_id=owner.id,
+            content_item_id=cid,
+            source=InventorySource.ADMIN_GRANT,
+            reference_id=None,
+        )
+        session.add(inventory)
+        await session.commit()
+        await session.refresh(inventory)
+        delivery = await request_delivery(session, owner.id, inventory.id)
+        assert delivery.media_asset_id == main_asset_id
+
+
+async def test_wheel_rejects_unpublished_cards(concurrent_client, concurrent_engine):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_session() as session:
+        client = concurrent_client
+        admin_token = await _create_admin_user(client, session, concurrent_engine)
+        draft_id = await _create_content(session, "Draft Card", status=ContentStatus.DRAFT)
+        disabled_id = await _create_content(session, "Disabled Card", status=ContentStatus.DISABLED)
+        published_id = await _create_content(session, "Published Card")
+        await session.commit()
+
+        wheel_id = await _create_wheel_with_segments(session, client, admin_token, [published_id])
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        for content_id in (draft_id, disabled_id):
+            response = await client.post(
+                f"/api/v1/admin/wheels/{wheel_id}/segments",
+                json={"content_item_id": content_id, "label": "Invalid", "weight": 1},
+                headers=headers,
+            )
+            assert response.status_code == 400
+            assert "published" in response.json()["detail"].lower()
+
+            response = await client.put(
+                f"/api/v1/admin/wheels/{wheel_id}/segments",
+                json={"segments": [{
+                    "content_item_id": content_id,
+                    "label": "Invalid",
+                    "weight": 1,
+                    "position": 2,
+                }]},
+                headers=headers,
+            )
+            assert response.status_code == 400
+            assert "published" in response.json()["detail"].lower()

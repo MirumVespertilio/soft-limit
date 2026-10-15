@@ -338,6 +338,11 @@ async def add_wheel_segment(
     content_item = await session.get(ContentItem, request.content_item_id)
     if not content_item:
         raise HTTPException(status_code=400, detail="Content item not found")
+    if content_item.status != ContentStatus.PUBLISHED:
+        raise HTTPException(
+            status_code=400,
+            detail="Only published content items can be added to the wheel",
+        )
 
     existing_result = await session.execute(
         select(WheelSegment.position).where(WheelSegment.wheel_id == wheel_id)
@@ -418,6 +423,16 @@ async def update_wheel_segments(
                 status_code=400,
                 detail=f"Segment {seg_id} does not belong to wheel {wheel_id}",
             )
+
+        # New/editable segments must point to published cards. Used historical
+        # segments may reference content later unpublished, but remain immutable.
+        if seg_id not in used_segment_ids:
+            item = await session.get(ContentItem, seg_data["content_item_id"])
+            if not item or item.status != ContentStatus.PUBLISHED:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only published content items can be added to the wheel",
+                )
 
         # A used segment is a historical record: it may be retained as-is, but
         # must not be repointed, relabelled, reweighted, moved or reactivated.
