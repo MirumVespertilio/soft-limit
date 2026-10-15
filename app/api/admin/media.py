@@ -153,6 +153,23 @@ async def upload_media(
     # A PREVIEW upload is display-only: never mark that same asset ORIGINAL,
     # otherwise the delivery flow could hand the preview to the user.
     if role == FileRole.PREVIEW:
+        # Remove legacy ORIGINAL links to the old preview assets before deleting
+        # their PREVIEW links. Earlier app versions incorrectly assigned both roles.
+        old_preview_result = await session.execute(
+            select(ContentItemMedia.media_asset_id).where(
+                ContentItemMedia.content_item_id == content_item_id,
+                ContentItemMedia.role == FileRole.PREVIEW,
+            )
+        )
+        old_preview_asset_ids = set(old_preview_result.scalars().all())
+        if old_preview_asset_ids:
+            await session.execute(
+                delete(ContentItemMedia).where(
+                    ContentItemMedia.content_item_id == content_item_id,
+                    ContentItemMedia.role == FileRole.ORIGINAL,
+                    ContentItemMedia.media_asset_id.in_(old_preview_asset_ids),
+                )
+            )
         await session.execute(
             delete(ContentItemMedia).where(
                 ContentItemMedia.content_item_id == content_item_id,

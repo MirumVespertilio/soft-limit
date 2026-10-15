@@ -136,7 +136,26 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
                     data={"content_item_id": str(cid), "role": "preview"},
                 )
                 assert r.status_code == 200
-                preview_asset_id = r.json()["media_asset_id"]
+                old_preview_asset_id = r.json()["media_asset_id"]
+
+                # Simulate legacy data produced by v2/v3: the same preview asset
+                # also had an ORIGINAL relation. Replacing the preview must clean it.
+                session.add(ContentItemMedia(
+                    content_item_id=cid,
+                    media_asset_id=old_preview_asset_id,
+                    role=FileRole.ORIGINAL,
+                ))
+                await session.commit()
+
+                r_replacement = await c.post(
+                    "/api/v1/admin/media/upload",
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                    files={"file": ("test-preview-replacement.jpg", img_bytes, "image/jpeg")},
+                    data={"content_item_id": str(cid), "role": "preview"},
+                )
+                assert r_replacement.status_code == 200
+                preview_asset_id = r_replacement.json()["media_asset_id"]
+
                 r_main = await c.post(
                     "/api/v1/admin/media/upload",
                     headers={"Authorization": f"Bearer {admin_token}"},
@@ -160,6 +179,8 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
             roles_by_asset.setdefault(link.media_asset_id, set()).add(link.role)
         assert FileRole.PREVIEW in roles_by_asset[preview_asset_id]
         assert FileRole.ORIGINAL not in roles_by_asset[preview_asset_id]
+        assert FileRole.ORIGINAL not in roles_by_asset.get(old_preview_asset_id, set())
+        assert FileRole.PREVIEW not in roles_by_asset.get(old_preview_asset_id, set())
         assert FileRole.MAIN in roles_by_asset[main_asset_id]
         assert FileRole.ORIGINAL in roles_by_asset[main_asset_id]
 
