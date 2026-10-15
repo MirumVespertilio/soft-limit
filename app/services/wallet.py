@@ -29,16 +29,44 @@ async def adjust_balance(
 ) -> WalletTransaction:
     wallet = await get_wallet_by_user_id(session, user_id)
 
-    if resource == TransactionResource.TEST_STARS:
-        new_balance = wallet.test_stars_balance + amount
-        if new_balance < 0:
-            raise InsufficientBalanceError("Insufficient test stars")
-        wallet.test_stars_balance = new_balance
-    elif resource == TransactionResource.SPINS:
-        new_balance = wallet.spins_balance + amount
-        if new_balance < 0:
-            raise InsufficientBalanceError("Insufficient spins")
-        wallet.spins_balance = new_balance
+    if amount >= 0:
+        if resource == TransactionResource.TEST_STARS:
+            stmt = (
+                update(UserWallet)
+                .where(UserWallet.user_id == user_id)
+                .values(test_stars_balance=UserWallet.test_stars_balance + amount)
+            )
+        else:
+            stmt = (
+                update(UserWallet)
+                .where(UserWallet.user_id == user_id)
+                .values(spins_balance=UserWallet.spins_balance + amount)
+            )
+        result = await session.execute(stmt)
+        if result.rowcount == 0:
+            raise ValueError("Wallet not found")
+    else:
+        if resource == TransactionResource.TEST_STARS:
+            stmt = (
+                update(UserWallet)
+                .where(
+                    UserWallet.user_id == user_id,
+                    UserWallet.test_stars_balance >= -amount,
+                )
+                .values(test_stars_balance=UserWallet.test_stars_balance + amount)
+            )
+        else:
+            stmt = (
+                update(UserWallet)
+                .where(
+                    UserWallet.user_id == user_id,
+                    UserWallet.spins_balance >= -amount,
+                )
+                .values(spins_balance=UserWallet.spins_balance + amount)
+            )
+        result = await session.execute(stmt)
+        if result.rowcount == 0:
+            raise InsufficientBalanceError(f"Insufficient {resource.value}")
 
     tx = WalletTransaction(
         wallet_id=wallet.id,
@@ -50,5 +78,4 @@ async def adjust_balance(
         note=note,
     )
     session.add(tx)
-    await session.flush()
     return tx

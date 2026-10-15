@@ -1,3 +1,9 @@
+import os
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test_token")
+os.environ.setdefault("SECRET_KEY", "test_secret")
+os.environ.setdefault("ADMIN_TELEGRAM_ID", "999999")
+
+import asyncio
 import pytest
 from sqlalchemy import select
 
@@ -8,6 +14,8 @@ from app.models.inventory import UserInventory
 from app.models.content import ContentItem, ContentStatus, MediaType
 from app.models.wheel import Wheel, WheelSegment
 from app.models.welcome import WelcomeRewardItem
+from app.models.purchases import SpinPackage, SpinPurchase
+from app.models.delivery import MediaDelivery, DeliveryStatus
 from tests.test_auth import generate_init_data
 
 
@@ -132,7 +140,9 @@ async def test_insufficient_balance(client, session):
     assert "No spins" in response.json()["detail"]
 
 
-async def test_parallel_spins(client, session):
+async def test_parallel_spins(client, session, engine):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+
     token = await _create_user(client, 555555)
     item_id = await _setup_wheel(session)
 
@@ -149,17 +159,109 @@ async def test_parallel_spins(client, session):
     wallet.scalars().first().spins_balance = 5
     await session.commit()
 
-    success_count = 0
-    for i in range(5):
-        response = await client.post(
-            "/api/v1/spins",
-            json={"idempotency_key": f"par-{i}"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        if response.status_code == 200:
-            success_count += 1
+    async def do_spin(i):
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with async_session() as s:
+            from app.db import get_session as orig_get_session
+            from app.main import app
+            from app.api.deps import get_current_user_id as orig_get_current_user_id
 
+            async def override_get_session():
+                yield s
+
+            app.dependency_overrides[orig_get_session] = override_get_session
+            try:
+                return await client.post(
+                    "/api/v1/spins",
+                    json={"idempotency_key": f"par-{i}"},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            finally:
+                app.dependency_overrides.pop(orig_get_session, None)
+
+    responses = await asyncio.gather(*[do_spin(i) for i in range(5)])
+
+    success_count = sum(1 for r in responses if r.status_code == 200)
     assert success_count == 5
 
     spins = await session.execute(select(Spin))
     assert len(spins.scalars().all()) == 6
+
+
+async def test_concurrent_purchase(client, session):
+    token = await _create_user(client, 666666)
+    item_id = await _setup_wheel(session)
+
+    session.add(WelcomeRewardItem(content_item_id=item_id))
+    session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
+    await session.commit()
+
+    wallet = await session.execute(select(UserWallet))
+    wallet.scalars().first().test_stars_balance = 5
+    await session.commit()
+
+    pkg = await session.execute(select(SpinPackage))
+    package_id = pkg.scalars().first().id
+
+    async def do_purchase(i):
+        return await client.post(
+            "/api/v1/spin-purchases",
+            json={"package_id": package_id, "idempotency_key": f"pur-{i}"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    responses = await asyncio.gather(*[do_purchase(i) for i in range(3)])
+
+    success_count = sum(1 for r in responses if r.status_code == 200)
+    assert success_count == 1
+
+    purchases = await session.execute(select(SpinPurchase))
+    assert len(purchases.scalars().all()) == 1
+
+
+async def test_duplicate_delivery(client, session):
+    from app.models.content import MediaAsset, ContentItemMedia, FileRole
+
+    token = await _create_user(client, 777777)
+    item_id = await _setup_wheel(session)
+
+    session.add(WelcomeRewardItem(content_item_id=item_id))
+    await session.flush()
+
+    asset = MediaAsset(
+        file_type=MediaType.PHOTO,
+        telegram_file_id="test_file_id",
+        telegram_file_unique_id="test_unique_id",
+        mime_type="image/jpeg",
+        file_size=1024,
+    )
+    session.add(asset)
+    await session.flush()
+
+    session.add(ContentItemMedia(
+        content_item_id=item_id,
+        media_asset_id=asset.id,
+        role=FileRole.MAIN,
+    ))
+    await session.commit()
+
+    await client.post(
+        "/api/v1/spins",
+        json={"idempotency_key": "d1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    inv = await session.execute(select(UserInventory))
+    inv_id = inv.scalars().first().id
+
+    r1 = await client.post(
+        f"/api/v1/inventory/{inv_id}/deliver",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    r2 = await client.post(
+        f"/api/v1/inventory/{inv_id}/deliver",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert r1.status_code == 200
+    assert r2.status_code == 200

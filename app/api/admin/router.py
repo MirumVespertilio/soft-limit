@@ -277,6 +277,22 @@ async def list_wheels(
     }
 
 
+class WheelCreateRequest(BaseModel):
+    name: str
+
+
+@router.post("/wheels")
+async def create_wheel(
+    request: WheelCreateRequest,
+    admin_id: int = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    wheel = Wheel(name=request.name, status="active")
+    session.add(wheel)
+    await session.commit()
+    return {"id": wheel.id}
+
+
 class SegmentUpdateRequest(BaseModel):
     segments: list[dict]
 
@@ -294,32 +310,43 @@ async def update_wheel_segments(
     if not wheel:
         raise HTTPException(status_code=404, detail="Wheel not found")
 
+    existing_result = await session.execute(
+        select(WheelSegment).where(WheelSegment.wheel_id == wheel_id)
+    )
+    existing_segments = {s.id: s for s in existing_result.scalars().all()}
+
     used_result = await session.execute(
-        select(WheelSegment.id).join(Spin, Spin.segment_id == WheelSegment.id).where(
-            WheelSegment.wheel_id == wheel_id
-        ).distinct()
+        select(WheelSegment.id)
+        .join(Spin, Spin.segment_id == WheelSegment.id)
+        .where(WheelSegment.wheel_id == wheel_id)
+        .distinct()
     )
     used_segment_ids = {row[0] for row in used_result.all()}
 
-    new_segment_ids = {s["segment_id"] for s in request.segments if "segment_id" in s}
-    segments_to_deactivate = used_segment_ids - new_segment_ids
+    new_segment_ids = set()
+    for seg_data in request.segments:
+        seg_id = seg_data.get("segment_id")
+        if seg_id is not None:
+            if seg_id not in existing_segments or existing_segments[seg_id].wheel_id != wheel_id:
+                raise HTTPException(status_code=400, detail=f"Segment {seg_id} does not belong to wheel {wheel_id}")
+            new_segment_ids.add(seg_id)
 
-    await session.execute(
-        WheelSegment.__table__.delete().where(
-            WheelSegment.wheel_id == wheel_id,
-            WheelSegment.id.notin_(segments_to_deactivate) if segments_to_deactivate else True,
-        )
-    )
-
-    for seg in segments_to_deactivate:
-        await session.execute(
-            update(WheelSegment).where(WheelSegment.id == seg).values(is_active=False)
-        )
+    for seg_id, seg in existing_segments.items():
+        if seg_id not in new_segment_ids:
+            if seg_id in used_segment_ids:
+                await session.execute(
+                    update(WheelSegment).where(WheelSegment.id == seg_id).values(is_active=False)
+                )
+            else:
+                await session.execute(
+                    WheelSegment.__table__.delete().where(WheelSegment.id == seg_id)
+                )
 
     for seg_data in request.segments:
-        if "segment_id" in seg_data:
+        seg_id = seg_data.get("segment_id")
+        if seg_id is not None:
             await session.execute(
-                update(WheelSegment).where(WheelSegment.id == seg_data["segment_id"]).values(
+                update(WheelSegment).where(WheelSegment.id == seg_id).values(
                     label=seg_data["label"],
                     weight=seg_data["weight"],
                     is_active=seg_data.get("is_active", True),

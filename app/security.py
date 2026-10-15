@@ -29,7 +29,10 @@ def verify_telegram_init_data(init_data: str) -> dict:
     except (ValueError, TypeError):
         raise HTTPException(status_code=401, detail="Invalid auth_date")
 
-    if time.time() - auth_date > 86400:
+    now = int(time.time())
+    if auth_date > now + 300:
+        raise HTTPException(status_code=401, detail="auth_date is in the future")
+    if now - auth_date > 86400:
         raise HTTPException(status_code=401, detail="Init data expired")
 
     user_json = params.get("user", "{}")
@@ -37,6 +40,9 @@ def verify_telegram_init_data(init_data: str) -> dict:
         user_data = json.loads(user_json)
     except json.JSONDecodeError:
         raise HTTPException(status_code=401, detail="Invalid user data")
+
+    if "id" not in user_data or not isinstance(user_data["id"], int) or user_data["id"] <= 0:
+        raise HTTPException(status_code=401, detail="Invalid user id")
 
     user_data["auth_date"] = auth_date
     return user_data

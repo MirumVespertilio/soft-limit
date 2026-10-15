@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.delivery import MediaDelivery, DeliveryStatus
@@ -22,6 +22,8 @@ async def request_delivery(
     )
     delivery = result.scalar_one_or_none()
     if delivery:
+        if delivery.status == DeliveryStatus.SENT:
+            return delivery
         return delivery
 
     inv_result = await session.execute(
@@ -70,6 +72,9 @@ async def execute_delivery(
     delivery = await session.get(MediaDelivery, delivery_id)
     if not delivery:
         raise ValueError("Delivery not found")
+
+    if delivery.status == DeliveryStatus.SENT:
+        return delivery
 
     asset = await session.get(MediaAsset, delivery.media_asset_id)
     if not asset:

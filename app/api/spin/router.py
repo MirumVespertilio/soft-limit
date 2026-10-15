@@ -12,7 +12,7 @@ from app.db import get_session
 from app.models.user import User
 from app.models.wheel import WheelSegment
 from app.models.spin import Spin, SpinType
-from app.models.content import ContentItem
+from app.models.content import ContentItem, ContentStatus
 from app.models.inventory import UserInventory, InventorySource
 from app.models.wallet import TransactionResource, TransactionReason
 from app.services.wallet import adjust_balance, InsufficientBalanceError, get_wallet_by_user_id
@@ -67,9 +67,19 @@ async def create_spin(
     is_welcome = user.welcome_spin_used_at is None
 
     if is_welcome:
+        wheel = await get_active_wheel(session)
+        if not wheel:
+            raise HTTPException(status_code=400, detail="No active wheel")
+
         pool_result = await session.execute(
             select(WelcomeRewardItem, ContentItem)
             .join(ContentItem, WelcomeRewardItem.content_item_id == ContentItem.id)
+            .join(WheelSegment, WheelSegment.content_item_id == ContentItem.id)
+            .where(
+                WheelSegment.wheel_id == wheel.id,
+                WheelSegment.is_active == True,
+                ContentItem.status == ContentStatus.PUBLISHED,
+            )
             .order_by(WelcomeRewardItem.position)
         )
         pool = pool_result.all()

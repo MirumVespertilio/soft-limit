@@ -80,9 +80,18 @@ async def update_content(
         setattr(item, key, value)
 
     if request.status == ContentStatus.PUBLISHED:
+        from app.models.wheel import Wheel
+        wheel_result = await session.execute(
+            select(Wheel).where(Wheel.status == "active").limit(1)
+        )
+        wheel = wheel_result.scalars().first()
+        if not wheel:
+            raise HTTPException(status_code=400, detail="No active wheel")
+
         in_wheel = await session.execute(
             select(WheelSegment).where(
                 WheelSegment.content_item_id == content_id,
+                WheelSegment.wheel_id == wheel.id,
                 WheelSegment.is_active == True,
             ).limit(1)
         )
