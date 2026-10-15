@@ -563,8 +563,8 @@ async function addSegment() {
         if (!wheel) { alert('Нет активного колеса'); return; }
 
         await api(`/admin/wheels/${wheel.id}/segments`, {
-            method: 'PUT',
-            body: JSON.stringify({ segments: [{ content_item_id, label, weight, position }] }),
+            method: 'POST',
+            body: JSON.stringify({ content_item_id, label, weight, position }),
         });
         alert('Сектор добавлен');
         loadAdminWheel();

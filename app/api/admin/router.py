@@ -415,14 +415,6 @@ async def update_wheel_segments(
                     WheelSegment.__table__.delete().where(WheelSegment.id == seg_id)
                 )
 
-    temp_offset = 10000
-    for seg in existing_segments.values():
-        await session.execute(
-            update(WheelSegment)
-            .where(WheelSegment.id == seg.id)
-            .values(position=seg.position + temp_offset)
-        )
-
     for seg_data in request.segments:
         seg_id = seg_data.get("segment_id")
         if seg_id is not None:
