@@ -240,3 +240,58 @@ async def test_wheel_rejects_unpublished_cards(concurrent_client, concurrent_eng
             )
             assert response.status_code == 400
             assert "published" in response.json()["detail"].lower()
+
+
+async def test_publish_card_before_adding_to_wheel(concurrent_client, concurrent_engine):
+    """A card can be published first, then linked to a wheel segment."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    client = concurrent_client
+    async_session = async_sessionmaker(
+        concurrent_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async with async_session() as session:
+        admin_token = await _create_admin_user(client, session, concurrent_engine)
+        draft_id = await _create_content(
+            session,
+            "Publish before wheel",
+            status=ContentStatus.DRAFT,
+        )
+        await session.commit()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        wheel_response = await client.post(
+            "/api/v1/admin/wheels",
+            json={"name": "Publish Flow Wheel"},
+            headers=headers,
+        )
+        assert wheel_response.status_code == 200, wheel_response.text
+        wheel_id = wheel_response.json()["id"]
+
+        publish_response = await client.patch(
+            f"/api/v1/admin/content/{draft_id}",
+            json={"status": "published"},
+            headers=headers,
+        )
+        assert publish_response.status_code == 200, publish_response.text
+
+        segment_response = await client.post(
+            f"/api/v1/admin/wheels/{wheel_id}/segments",
+            json={
+                "content_item_id": draft_id,
+                "label": "New prize",
+                "weight": 1,
+                "position": 0,
+            },
+            headers=headers,
+        )
+        assert segment_response.status_code == 200, segment_response.text
+
+        wheel_response = await client.get("/api/v1/wheel", headers=headers)
+        assert wheel_response.status_code == 200, wheel_response.text
+        visible_ids = {
+            segment["content_item_id"]
+            for segment in wheel_response.json()["segments"]
+        }
+        assert draft_id in visible_ids

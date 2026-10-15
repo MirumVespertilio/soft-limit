@@ -7,7 +7,6 @@ from app.api.deps import get_current_admin
 from app.db import get_session
 from app.models.content import ContentItem, ContentStatus, MediaType
 from app.models.content import ContentItemMedia, MediaAsset, FileRole
-from app.models.wheel import WheelSegment
 from app.models.welcome import WelcomeRewardItem
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-content"])
@@ -78,28 +77,6 @@ async def update_content(
 
     for key, value in request.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
-
-    if request.status == ContentStatus.PUBLISHED:
-        from app.models.wheel import Wheel
-        wheel_result = await session.execute(
-            select(Wheel).where(Wheel.status == "active").limit(1)
-        )
-        wheel = wheel_result.scalars().first()
-        if not wheel:
-            raise HTTPException(status_code=400, detail="No active wheel")
-
-        in_wheel = await session.execute(
-            select(WheelSegment).where(
-                WheelSegment.content_item_id == content_id,
-                WheelSegment.wheel_id == wheel.id,
-                WheelSegment.is_active == True,
-            ).limit(1)
-        )
-        if not in_wheel.scalars().first():
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot publish: content not linked to active wheel segment",
-            )
 
     await session.commit()
     return {"id": item.id}
