@@ -1,13 +1,14 @@
 from datetime import datetime
-from enum import Enum
+from enum import Enum as PyEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
 
-class WheelStatus(str, Enum):
+class WheelStatus(PyEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
 
@@ -17,7 +18,7 @@ class Wheel(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
-    status: Mapped[WheelStatus] = mapped_column(Enum("active", "inactive", name="wheelstatus"), default=WheelStatus.ACTIVE)
+    status: Mapped[WheelStatus] = mapped_column(SAEnum(WheelStatus, values_callable=lambda x: [e.value for e in x]), default=WheelStatus.ACTIVE)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -26,7 +27,10 @@ class Wheel(Base):
 
 class WheelSegment(Base):
     __tablename__ = "wheel_segments"
-    __table_args__ = (UniqueConstraint("wheel_id", "position"),)
+    __table_args__ = (
+        UniqueConstraint("wheel_id", "position"),
+        CheckConstraint("weight > 0", name="ck_wheel_segments_weight_positive"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     wheel_id: Mapped[int] = mapped_column(ForeignKey("wheels.id", ondelete="CASCADE"), index=True)

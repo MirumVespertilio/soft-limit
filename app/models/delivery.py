@@ -1,13 +1,14 @@
 from datetime import datetime
-from enum import Enum
+from enum import Enum as PyEnum
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
 
-class DeliveryStatus(str, Enum):
+class DeliveryStatus(PyEnum):
     PENDING = "pending"
     SENT = "sent"
     FAILED = "failed"
@@ -20,7 +21,7 @@ class MediaDelivery(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     media_asset_id: Mapped[int] = mapped_column(ForeignKey("media_assets.id"))
     inventory_id: Mapped[int | None] = mapped_column(ForeignKey("user_inventory.id"), nullable=True)
-    status: Mapped[DeliveryStatus] = mapped_column(Enum("pending", "sent", "failed", name="deliverystatus"), default=DeliveryStatus.PENDING)
+    status: Mapped[DeliveryStatus] = mapped_column(SAEnum(DeliveryStatus, values_callable=lambda x: [e.value for e in x]), default=DeliveryStatus.PENDING)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

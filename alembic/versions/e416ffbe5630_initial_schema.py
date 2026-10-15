@@ -1,8 +1,8 @@
 """initial_schema
 
-Revision ID: 620991431fcf
+Revision ID: e416ffbe5630
 Revises: 
-Create Date: 2026-10-15 18:09:10.201413
+Create Date: 2026-10-15 18:40:27.724606
 
 """
 from typing import Sequence, Union
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '620991431fcf'
+revision: str = 'e416ffbe5630'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -58,10 +58,12 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=128), nullable=False),
     sa.Column('spins_count', sa.Integer(), nullable=False),
-    sa.Column('price_stars', sa.Integer(), nullable=False),
+    sa.Column('price_test_stars', sa.Integer(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.CheckConstraint('price_test_stars >= 0', name='ck_spin_packages_price_non_negative'),
+    sa.CheckConstraint('spins_count > 0', name='ck_spin_packages_spins_positive'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('users',
@@ -113,7 +115,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('package_id', sa.Integer(), nullable=False),
-    sa.Column('price_stars', sa.Integer(), nullable=False),
+    sa.Column('price_test_stars', sa.Integer(), nullable=False),
     sa.Column('spins_added', sa.Integer(), nullable=False),
     sa.Column('idempotency_key', sa.String(length=64), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
@@ -142,6 +144,8 @@ def upgrade() -> None:
     sa.Column('test_stars_balance', sa.Integer(), nullable=False),
     sa.Column('spins_balance', sa.Integer(), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.CheckConstraint('spins_balance >= 0', name='ck_user_wallets_spins_non_negative'),
+    sa.CheckConstraint('test_stars_balance >= 0', name='ck_user_wallets_test_stars_non_negative'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('user_id'),
@@ -153,7 +157,6 @@ def upgrade() -> None:
     sa.Column('position', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['content_item_id'], ['content_items.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('content_item_id'),
     sa.UniqueConstraint('content_item_id')
     )
     op.create_table('wheel_segments',
@@ -164,6 +167,7 @@ def upgrade() -> None:
     sa.Column('weight', sa.Integer(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.CheckConstraint('weight > 0', name='ck_wheel_segments_weight_positive'),
     sa.ForeignKeyConstraint(['content_item_id'], ['content_items.id'], ),
     sa.ForeignKeyConstraint(['wheel_id'], ['wheels.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),

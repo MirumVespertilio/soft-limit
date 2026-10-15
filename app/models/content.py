@@ -1,25 +1,26 @@
 from datetime import datetime
-from enum import Enum
+from enum import Enum as PyEnum
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
 
-class FileRole(str, Enum):
+class FileRole(PyEnum):
     PREVIEW = "preview"
     MAIN = "main"
     ORIGINAL = "original"
 
 
-class ContentStatus(str, Enum):
+class ContentStatus(PyEnum):
     DRAFT = "draft"
     PUBLISHED = "published"
     DISABLED = "disabled"
 
 
-class MediaType(str, Enum):
+class MediaType(PyEnum):
     PHOTO = "photo"
     VIDEO = "video"
 
@@ -28,7 +29,7 @@ class MediaAsset(Base):
     __tablename__ = "media_assets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    file_type: Mapped[MediaType] = mapped_column(Enum("photo", "video", name="mediatype"))
+    file_type: Mapped[MediaType] = mapped_column(SAEnum(MediaType, values_callable=lambda x: [e.value for e in x]))
     telegram_file_id: Mapped[str] = mapped_column(String(256))
     telegram_file_unique_id: Mapped[str] = mapped_column(String(256))
     mime_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -49,8 +50,8 @@ class ContentItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[ContentStatus] = mapped_column(Enum("draft", "published", "disabled", name="contentstatus"), default=ContentStatus.DRAFT)
-    media_type: Mapped[MediaType] = mapped_column(Enum("photo", "video", name="mediatype"))
+    status: Mapped[ContentStatus] = mapped_column(SAEnum(ContentStatus, values_callable=lambda x: [e.value for e in x]), default=ContentStatus.DRAFT)
+    media_type: Mapped[MediaType] = mapped_column(SAEnum(MediaType, values_callable=lambda x: [e.value for e in x]))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -63,7 +64,7 @@ class ContentItemMedia(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"))
     media_asset_id: Mapped[int] = mapped_column(ForeignKey("media_assets.id", ondelete="CASCADE"))
-    role: Mapped[FileRole] = mapped_column(Enum("preview", "main", "original", name="filerole"))
+    role: Mapped[FileRole] = mapped_column(SAEnum(FileRole, values_callable=lambda x: [e.value for e in x]))
     position: Mapped[int] = mapped_column(Integer, default=0)
 
     content_item: Mapped["ContentItem"] = relationship(back_populates="media")
