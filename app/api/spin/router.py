@@ -34,6 +34,7 @@ class SpinResponse(BaseModel):
     description: str | None
     media_type: str
     is_welcome: bool
+    preview_media_id: int | None = None
 
 
 @router.post("/spins", response_model=SpinResponse)
@@ -50,6 +51,15 @@ async def create_spin(
     existing_spin = existing.scalar_one_or_none()
     if existing_spin:
         item = await session.get(ContentItem, existing_spin.content_item_id)
+        from app.models.content import ContentItemMedia, FileRole
+        preview_result = await session.execute(
+            select(ContentItemMedia.media_asset_id)
+            .where(
+                ContentItemMedia.content_item_id == item.id,
+                ContentItemMedia.role == FileRole.PREVIEW,
+            ).limit(1)
+        )
+        preview_media_id = preview_result.scalars().first()
         return SpinResponse(
             spin_id=existing_spin.id,
             content_item_id=item.id,
@@ -58,6 +68,7 @@ async def create_spin(
             description=item.description,
             media_type=item.media_type.value,
             is_welcome=existing_spin.spin_type == SpinType.WELCOME,
+            preview_media_id=preview_media_id,
         )
 
     user = await session.get(User, user_id)
@@ -81,6 +92,7 @@ async def create_spin(
                 ContentItem.status == ContentStatus.PUBLISHED,
             )
             .order_by(WelcomeRewardItem.position)
+            .distinct()
         )
         pool = pool_result.all()
         if not pool:
@@ -136,6 +148,16 @@ async def create_spin(
 
     await session.commit()
 
+    from app.models.content import ContentItemMedia, FileRole
+    preview_result = await session.execute(
+        select(ContentItemMedia.media_asset_id)
+        .where(
+            ContentItemMedia.content_item_id == chosen_item.id,
+            ContentItemMedia.role == FileRole.PREVIEW,
+        ).limit(1)
+    )
+    preview_media_id = preview_result.scalars().first()
+
     return SpinResponse(
         spin_id=spin.id,
         content_item_id=chosen_item.id,
@@ -144,4 +166,5 @@ async def create_spin(
         description=chosen_item.description,
         media_type=chosen_item.media_type.value,
         is_welcome=is_welcome,
+        preview_media_id=preview_media_id,
     )

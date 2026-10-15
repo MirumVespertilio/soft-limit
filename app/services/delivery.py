@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.delivery import MediaDelivery, DeliveryStatus
 from app.models.inventory import UserInventory
-from app.models.content import ContentItem, ContentItemMedia, MediaAsset, MediaType
+from app.models.content import ContentItem, ContentItemMedia, MediaAsset, MediaType, FileRole
 from app.models.user import User
 
 
@@ -32,15 +33,18 @@ async def request_delivery(
             UserInventory.id == inventory_id,
             UserInventory.user_id == user_id,
         )
-        .order_by(ContentItemMedia.position)
     )
-    media_link = inv_result.scalars().first()
-    if not media_link:
-        raise ValueError("Media not found for this inventory item")
+    media_links = inv_result.scalars().all()
+
+    original_link = next((m for m in media_links if m.role == FileRole.ORIGINAL), None)
+    if not original_link:
+        original_link = next((m for m in media_links if m.role == FileRole.MAIN), None)
+    if not original_link:
+        raise ValueError("No original media found for this inventory item")
 
     delivery = MediaDelivery(
         user_id=user_id,
-        media_asset_id=media_link.media_asset_id,
+        media_asset_id=original_link.media_asset_id,
         inventory_id=inventory_id,
         status=DeliveryStatus.PENDING,
     )
@@ -98,15 +102,15 @@ async def execute_delivery(
     delivery.last_attempt_at = datetime.now(timezone.utc)
 
     try:
-        if asset.file_type == MediaType.PHOTO:
-            await bot.send_photo(
-                chat_id=user.telegram_id,
-                photo=asset.telegram_file_id,
-            )
-        elif asset.file_type == MediaType.VIDEO:
+        if asset.file_type == MediaType.VIDEO:
             await bot.send_video(
                 chat_id=user.telegram_id,
                 video=asset.telegram_file_id,
+            )
+        else:
+            await bot.send_document(
+                chat_id=user.telegram_id,
+                document=asset.telegram_file_id,
             )
         delivery.status = DeliveryStatus.SENT
     except Exception as e:

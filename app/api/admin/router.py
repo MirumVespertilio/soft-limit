@@ -301,6 +301,9 @@ async def create_wheel(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    await session.execute(
+        update(Wheel).where(Wheel.status == "active").values(status="inactive")
+    )
     wheel = Wheel(name=request.name, status="active")
     session.add(wheel)
     await session.commit()
@@ -371,6 +374,7 @@ async def update_wheel_segments(
         if seg_id is not None:
             await session.execute(
                 update(WheelSegment).where(WheelSegment.id == seg_id).values(
+                    content_item_id=seg_data["content_item_id"],
                     label=seg_data["label"],
                     weight=seg_data["weight"],
                     is_active=seg_data.get("is_active", True),

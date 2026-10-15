@@ -1,5 +1,6 @@
 import io
 from PIL import Image
+from aiogram.types import BufferedInputFile
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select
@@ -72,54 +73,58 @@ async def upload_media(
         if file_type == MediaType.PHOTO:
             img = Image.open(io.BytesIO(content))
             orig_width, orig_height = img.size
+            orig_format = img.format or "JPEG"
+            orig_mime = f"image/{orig_format.lower()}" if orig_format != "JPEG" else "image/jpeg"
 
-            img_for_doc = img.copy()
-            if img_for_doc.mode in ("RGBA", "LA", "P"):
-                background = Image.new("RGB", img_for_doc.size, (255, 255, 255))
-                if img_for_doc.mode == "P":
-                    img_for_doc = img_for_doc.convert("RGBA")
-                if img_for_doc.mode in ("RGBA", "LA"):
-                    background.paste(img_for_doc, mask=img_for_doc.split()[-1])
-                    img_for_doc = background
-            else:
-                img_for_doc = img_for_doc.convert("RGB")
-
-            doc_buf = io.BytesIO()
-            img_for_doc.save(doc_buf, format="JPEG", quality=92)
-            doc_buf.seek(0)
-
+            orig_input = BufferedInputFile(content, filename=file.filename)
             sent = await bot.send_document(
                 chat_id=settings.CHANNEL_ID,
-                document=doc_buf,
+                document=orig_input,
                 caption=f"Original: {file.filename}",
             )
             telegram_file_id = sent.document.file_id
             telegram_file_unique_id = sent.document.file_unique_id
 
-            img.thumbnail((320, 320))
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85)
-            preview_content = buf.getvalue()
-            prev_width, prev_height = img.size
+            preview_img = img.copy()
+            preview_img.thumbnail((320, 320))
+            if preview_img.mode in ("RGBA", "LA", "P"):
+                background = Image.new("RGB", preview_img.size, (255, 255, 255))
+                if preview_img.mode == "P":
+                    preview_img = preview_img.convert("RGBA")
+                if preview_img.mode in ("RGBA", "LA"):
+                    background.paste(preview_img, mask=preview_img.split()[-1])
+                    preview_img = background
+            else:
+                preview_img = preview_img.convert("RGB")
 
+            preview_buf = io.BytesIO()
+            preview_img.save(preview_buf, format="JPEG", quality=85)
+            preview_bytes = preview_buf.getvalue()
+            prev_width, prev_height = preview_img.size
+
+            prev_input = BufferedInputFile(preview_bytes, filename=f"preview_{file.filename}")
             prev_sent = await bot.send_photo(
                 chat_id=settings.CHANNEL_ID,
-                photo=preview_content,
+                photo=prev_input,
                 caption=f"Preview: {file.filename}",
             )
             prev_file_id = prev_sent.photo[-1].file_id
             prev_file_unique_id = prev_sent.photo[-1].file_unique_id
+            prev_mime = "image/jpeg"
         else:
+            orig_input = BufferedInputFile(content, filename=file.filename)
             sent = await bot.send_video(
                 chat_id=settings.CHANNEL_ID,
-                video=content,
+                video=orig_input,
                 caption=f"Upload: {file.filename}",
             )
             telegram_file_id = sent.video.file_id
             telegram_file_unique_id = sent.video.file_unique_id
+            orig_mime = file.content_type or "video/mp4"
             orig_width = orig_height = None
             prev_file_id = prev_file_unique_id = None
             prev_width = prev_height = None
+            prev_mime = None
     finally:
         await bot.session.close()
 
@@ -127,7 +132,7 @@ async def upload_media(
         file_type=file_type,
         telegram_file_id=telegram_file_id,
         telegram_file_unique_id=telegram_file_unique_id,
-        mime_type=file.content_type,
+        mime_type=orig_mime,
         file_size=len(content),
         file_name=file.filename,
         width=orig_width,
@@ -155,8 +160,8 @@ async def upload_media(
                 file_type=MediaType.PHOTO,
                 telegram_file_id=prev_file_id,
                 telegram_file_unique_id=prev_file_unique_id,
-                mime_type="image/jpeg",
-                file_size=len(preview_content),
+                mime_type=prev_mime,
+                file_size=len(preview_bytes),
                 file_name=f"preview_{file.filename}",
                 width=prev_width,
                 height=prev_height,

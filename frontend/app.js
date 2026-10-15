@@ -182,7 +182,7 @@ async function spin() {
         const result = await response.json();
 
         if (response.ok) {
-            await animateWheel(result.segment_id);
+            await animateWheel(result.segment_id, result.content_item_id);
             showResult(result);
             loadBalances();
         } else {
@@ -197,14 +197,20 @@ async function spin() {
     }
 }
 
-function animateWheel(targetSegmentId) {
+function animateWheel(targetSegmentId, targetContentItemId) {
     return new Promise((resolve) => {
         const canvas = document.getElementById('wheel-canvas');
         const ctx = canvas.getContext('2d');
         const segments = wheelData.segments;
         const totalWeight = segments.reduce((sum, s) => sum + s.weight, 0);
 
-        const targetIndex = segments.findIndex(s => s.segment_id === targetSegmentId);
+        let targetIndex = -1;
+        if (targetSegmentId) {
+            targetIndex = segments.findIndex(s => s.segment_id === targetSegmentId);
+        }
+        if (targetIndex === -1 && targetContentItemId) {
+            targetIndex = segments.findIndex(s => s.content_item_id === targetContentItemId);
+        }
         if (targetIndex === -1) {
             resolve();
             return;
@@ -216,7 +222,13 @@ function animateWheel(targetSegmentId) {
         }
         targetAngle += (segments[targetIndex].weight / totalWeight) * Math.PI;
 
-        const totalRotation = Math.PI * 2 * 5 + targetAngle;
+        const pointerAngle = -Math.PI / 2;
+        const finalModAngle = ((targetAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        const pointerModAngle = ((pointerAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        let correction = pointerModAngle - finalModAngle;
+        if (correction < 0) correction += Math.PI * 2;
+
+        const totalRotation = Math.PI * 2 * 5 + correction;
         const duration = 4000;
         const startTime = performance.now();
         let currentRotation = 0;
@@ -226,12 +238,6 @@ function animateWheel(targetSegmentId) {
             const progress = Math.min(elapsed / duration, 1);
             const eased = 1 - Math.pow(1 - progress, 3);
             currentRotation = totalRotation * eased;
-
-            ctx.save();
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.rotate(currentRotation);
-            ctx.translate(-canvas.width / 2, -canvas.height / 2);
-            ctx.restore();
 
             drawWheelWithRotation(currentRotation);
 
@@ -301,6 +307,21 @@ function drawWheelWithRotation(rotation) {
     ctx.stroke();
 }
 
+async function loadPreviewImage(mediaId, imgElement) {
+    try {
+        const response = await api(`/media/${mediaId}/preview`);
+        if (response.ok) {
+            const blob = await response.blob();
+            imgElement.src = URL.createObjectURL(blob);
+            imgElement.style.display = 'block';
+        } else {
+            imgElement.style.display = 'none';
+        }
+    } catch (e) {
+        imgElement.style.display = 'none';
+    }
+}
+
 function showResult(result) {
     document.getElementById('wheel-section').classList.add('hidden');
     document.getElementById('result-section').classList.remove('hidden');
@@ -308,9 +329,7 @@ function showResult(result) {
     document.getElementById('result-description').textContent = result.description || '';
 
     if (result.preview_media_id) {
-        const img = document.getElementById('result-image');
-        img.src = `/api/v1/media/${result.preview_media_id}/preview`;
-        img.style.display = 'block';
+        loadPreviewImage(result.preview_media_id, document.getElementById('result-image'));
     } else {
         document.getElementById('result-image').style.display = 'none';
     }
@@ -328,16 +347,18 @@ async function loadInventory() {
         const grid = document.getElementById('inventory-grid');
         grid.innerHTML = '';
 
-        data.items.forEach(item => {
+        for (const item of data.items) {
             const div = document.createElement('div');
             div.className = 'inventory-item';
-            div.innerHTML = `
-                ${item.preview_media_id ? `<img src="/api/v1/media/${item.preview_media_id}/preview" alt="${item.title}">` : ''}
-                <h4>${item.title}</h4>
-                <p>${item.media_type}</p>
-            `;
+            const imgHtml = item.preview_media_id
+                ? `<img id="inv-img-${item.inventory_id}" src="" alt="${item.title}" style="display:none">`
+                : '';
+            div.innerHTML = `${imgHtml}<h4>${item.title}</h4><p>${item.media_type}</p>`;
             grid.appendChild(div);
-        });
+            if (item.preview_media_id) {
+                await loadPreviewImage(item.preview_media_id, div.querySelector('img'));
+            }
+        }
     } catch (e) {
         console.error('Failed to load inventory:', e);
     }
@@ -588,8 +609,14 @@ document.addEventListener('DOMContentLoaded', () => {
     token = getStoredToken();
 
     if (token) {
-        loadBalances();
-        loadWheel();
+        try {
+            const meResponse = await api('/me');
+            currentUser = await meResponse.json();
+            updateUI();
+        } catch (e) {
+            logout();
+            showLogin();
+        }
     } else if (tg?.initData) {
         auth();
     } else {
