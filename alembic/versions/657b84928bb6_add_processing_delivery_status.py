@@ -41,10 +41,21 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table('media_deliveries') as batch_op:
-        batch_op.alter_column(
-            'status',
-            existing_type=sa.Enum('pending', 'processing', 'sent', 'failed', name='deliverystatus'),
-            type_=sa.Enum('pending', 'sent', 'failed', name='deliverystatus'),
-            existing_nullable=False,
-        )
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        # PostgreSQL cannot drop one enum value in-place. Convert the column to
+        # text, recreate the enum without processing, then cast back. Any rows
+        # still PROCESSING are returned to PENDING as part of the downgrade.
+        op.execute("UPDATE media_deliveries SET status = 'pending' WHERE status::text = 'processing'")
+        op.execute("ALTER TABLE media_deliveries ALTER COLUMN status TYPE VARCHAR(32) USING status::text")
+        op.execute("DROP TYPE deliverystatus")
+        op.execute("CREATE TYPE deliverystatus AS ENUM ('pending', 'sent', 'failed')")
+        op.execute("ALTER TABLE media_deliveries ALTER COLUMN status TYPE deliverystatus USING status::text::deliverystatus")
+    else:
+        with op.batch_alter_table('media_deliveries') as batch_op:
+            batch_op.alter_column(
+                'status',
+                existing_type=sa.Enum('pending', 'processing', 'sent', 'failed', name='deliverystatus'),
+                type_=sa.Enum('pending', 'sent', 'failed', name='deliverystatus'),
+                existing_nullable=False,
+            )

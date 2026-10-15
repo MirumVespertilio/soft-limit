@@ -47,6 +47,7 @@ async def get_wheel(
         preview = preview_result.scalars().first()
         segments.append({
             "segment_id": seg.id,
+            "position": seg.position,
             "label": seg.label,
             "weight": seg.weight,
             "content_item_id": item.id,

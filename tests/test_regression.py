@@ -73,6 +73,14 @@ async def test_add_segment_preserves_others(concurrent_client, concurrent_engine
         assert len(segments) == 2
         assert all(s.is_active for s in segments)
 
+        wheel_response = await client.get(
+            "/api/v1/wheel",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert wheel_response.status_code == 200
+        wheel_data = wheel_response.json()
+        assert sorted(s["position"] for s in wheel_data["segments"]) == [0, 1]
+
 
 async def test_delivery_status_values():
     assert DeliveryStatus.PENDING.value == "pending"
@@ -128,6 +136,13 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
                     data={"content_item_id": str(cid), "role": "preview"},
                 )
                 assert r.status_code == 200
+                r_main = await c.post(
+                    "/api/v1/admin/media/upload",
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                    files={"file": ("test-main.jpg", img_bytes, "image/jpeg")},
+                    data={"content_item_id": str(cid), "role": "main"},
+                )
+                assert r_main.status_code == 200
 
         result = await session.execute(
             select(ContentItemMedia).where(ContentItemMedia.content_item_id == cid)
@@ -136,3 +151,4 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
         roles = {link.role for link in links}
         assert FileRole.ORIGINAL in roles
         assert FileRole.PREVIEW in roles
+        assert FileRole.MAIN in roles

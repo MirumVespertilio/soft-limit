@@ -318,7 +318,7 @@ class SegmentAddRequest(BaseModel):
     content_item_id: int
     label: str
     weight: int
-    position: int
+    position: int | None = None
 
 
 @router.post("/wheels/{wheel_id}/segments")
@@ -344,8 +344,16 @@ async def add_wheel_segment(
     )
     existing_positions = {row[0] for row in existing_result.all()}
 
-    if request.position in existing_positions:
-        raise HTTPException(status_code=400, detail="Position already taken")
+    if request.position is None:
+        position = 0
+        while position in existing_positions:
+            position += 1
+    else:
+        position = request.position
+        if position < 0:
+            raise HTTPException(status_code=400, detail="Position cannot be negative")
+        if position in existing_positions:
+            raise HTTPException(status_code=400, detail="Position already taken")
 
     segment = WheelSegment(
         wheel_id=wheel_id,
@@ -353,7 +361,7 @@ async def add_wheel_segment(
         label=request.label,
         weight=request.weight,
         is_active=True,
-        position=request.position,
+        position=position,
     )
     session.add(segment)
     await session.commit()
@@ -367,18 +375,21 @@ async def update_wheel_segments(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    """Replace editable wheel segments without mutating historical used rows."""
     wheel = await session.get(Wheel, wheel_id)
     if not wheel:
         raise HTTPException(status_code=404, detail="Wheel not found")
 
     positions = [s["position"] for s in request.segments]
+    if any(position < 0 for position in positions):
+        raise HTTPException(status_code=400, detail="Position cannot be negative")
     if len(positions) != len(set(positions)):
         raise HTTPException(status_code=400, detail="Duplicate positions in segments")
 
+    # Validate all input before mutating any rows.
     for seg_data in request.segments:
         if seg_data.get("weight", 0) <= 0:
             raise HTTPException(status_code=400, detail="Weight must be positive")
-
         content_item = await session.get(ContentItem, seg_data["content_item_id"])
         if not content_item:
             raise HTTPException(status_code=400, detail="Content item not found")
@@ -386,7 +397,7 @@ async def update_wheel_segments(
     existing_result = await session.execute(
         select(WheelSegment).where(WheelSegment.wheel_id == wheel_id)
     )
-    existing_segments = {s.id: s for s in existing_result.scalars().all()}
+    existing_segments = {segment.id: segment for segment in existing_result.scalars().all()}
 
     used_result = await session.execute(
         select(WheelSegment.id)
@@ -396,49 +407,102 @@ async def update_wheel_segments(
     )
     used_segment_ids = {row[0] for row in used_result.all()}
 
-    new_segment_ids = set()
+    provided_ids = [data.get("segment_id") for data in request.segments if data.get("segment_id") is not None]
+    if len(provided_ids) != len(set(provided_ids)):
+        raise HTTPException(status_code=400, detail="Duplicate segment_id values")
+
     for seg_data in request.segments:
         seg_id = seg_data.get("segment_id")
-        if seg_id is not None:
-            if seg_id not in existing_segments or existing_segments[seg_id].wheel_id != wheel_id:
-                raise HTTPException(status_code=400, detail=f"Segment {seg_id} does not belong to wheel {wheel_id}")
-            new_segment_ids.add(seg_id)
+        if seg_id is not None and seg_id not in existing_segments:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Segment {seg_id} does not belong to wheel {wheel_id}",
+            )
 
-    for seg_id, seg in existing_segments.items():
-        if seg_id not in new_segment_ids:
-            if seg_id in used_segment_ids:
-                await session.execute(
-                    update(WheelSegment).where(WheelSegment.id == seg_id).values(is_active=False)
+        # A used segment is a historical record: it may be retained as-is, but
+        # must not be repointed, relabelled, reweighted, moved or reactivated.
+        if seg_id in used_segment_ids:
+            old = existing_segments[seg_id]
+            requested_values = {
+                "content_item_id": seg_data.get("content_item_id", old.content_item_id),
+                "label": seg_data.get("label", old.label),
+                "weight": seg_data.get("weight", old.weight),
+                "position": seg_data.get("position", old.position),
+                "is_active": seg_data.get("is_active", old.is_active),
+            }
+            old_values = {
+                "content_item_id": old.content_item_id,
+                "label": old.label,
+                "weight": old.weight,
+                "position": old.position,
+                "is_active": old.is_active,
+            }
+            if requested_values != old_values:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Used segment {seg_id} is immutable; create a new segment instead",
                 )
+
+    requested_ids = set(provided_ids)
+    reserved_positions = {
+        segment.position: segment.id
+        for segment in existing_segments.values()
+        if segment.id in used_segment_ids
+    }
+    for seg_data in request.segments:
+        blocker = reserved_positions.get(seg_data["position"])
+        if blocker is not None and blocker != seg_data.get("segment_id"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Position {seg_data['position']} is reserved by historical segment {blocker}",
+            )
+
+    # Omitted rows: historical rows are retained (and deactivated); unused rows
+    # can be removed. This happens only after all request validation succeeds.
+    for seg_id, segment in existing_segments.items():
+        if seg_id not in requested_ids:
+            if seg_id in used_segment_ids:
+                if segment.is_active:
+                    await session.execute(
+                        update(WheelSegment).where(WheelSegment.id == seg_id).values(is_active=False)
+                    )
             else:
                 await session.execute(
                     WheelSegment.__table__.delete().where(WheelSegment.id == seg_id)
                 )
 
+    # Move only editable existing rows to temporary unique positions, so swaps
+    # such as 0 <-> 1 cannot violate UNIQUE(wheel_id, position) mid-update.
+    editable_existing_ids = [
+        seg_data["segment_id"]
+        for seg_data in request.segments
+        if seg_data.get("segment_id") is not None
+        and seg_data["segment_id"] not in used_segment_ids
+    ]
+    all_positions = [segment.position for segment in existing_segments.values()] + positions + [0]
+    temporary_position = max(all_positions) + len(existing_segments) + 10000
+    for offset, seg_id in enumerate(editable_existing_ids):
+        await session.execute(
+            update(WheelSegment)
+            .where(WheelSegment.id == seg_id)
+            .values(position=temporary_position + offset)
+        )
+
     for seg_data in request.segments:
         seg_id = seg_data.get("segment_id")
-        if seg_id is not None:
-            seg = existing_segments.get(seg_id)
-            if seg and seg.id in used_segment_ids:
-                continue
+        values = {
+            "content_item_id": seg_data["content_item_id"],
+            "label": seg_data["label"],
+            "weight": seg_data["weight"],
+            "is_active": seg_data.get("is_active", True),
+            "position": seg_data["position"],
+        }
+        if seg_id is None:
+            session.add(WheelSegment(wheel_id=wheel_id, **values))
+        elif seg_id not in used_segment_ids:
             await session.execute(
-                update(WheelSegment).where(WheelSegment.id == seg_id).values(
-                    label=seg_data["label"],
-                    weight=seg_data["weight"],
-                    is_active=seg_data.get("is_active", True),
-                    position=seg_data["position"],
-                )
+                update(WheelSegment).where(WheelSegment.id == seg_id).values(**values)
             )
-        else:
-            segment = WheelSegment(
-                wheel_id=wheel_id,
-                content_item_id=seg_data["content_item_id"],
-                label=seg_data["label"],
-                weight=seg_data["weight"],
-                is_active=seg_data.get("is_active", True),
-                position=seg_data["position"],
-            )
-            session.add(segment)
 
     await session.commit()
     return {"updated": True}

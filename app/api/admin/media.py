@@ -3,7 +3,7 @@ from PIL import Image
 from aiogram.types import BufferedInputFile
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
@@ -63,6 +63,8 @@ async def upload_media(
         raise HTTPException(status_code=415, detail="Unsupported file type")
 
     file_type = MediaType.PHOTO if is_image else MediaType.VIDEO
+    if role == FileRole.PREVIEW and file_type != MediaType.PHOTO:
+        raise HTTPException(status_code=400, detail="Preview must be an image; upload a video as Main")
 
     from aiogram import Bot
     from app.config import settings
@@ -85,32 +87,38 @@ async def upload_media(
             telegram_file_id = sent.document.file_id
             telegram_file_unique_id = sent.document.file_unique_id
 
-            preview_img = img.copy()
-            preview_img.thumbnail((320, 320))
-            if preview_img.mode in ("RGBA", "LA", "P"):
-                background = Image.new("RGB", preview_img.size, (255, 255, 255))
-                if preview_img.mode == "P":
-                    preview_img = preview_img.convert("RGBA")
-                if preview_img.mode in ("RGBA", "LA"):
-                    background.paste(preview_img, mask=preview_img.split()[-1])
-                    preview_img = background
+            if role != FileRole.PREVIEW:
+                preview_img = img.copy()
+                preview_img.thumbnail((320, 320))
+                if preview_img.mode in ("RGBA", "LA", "P"):
+                    background = Image.new("RGB", preview_img.size, (255, 255, 255))
+                    if preview_img.mode == "P":
+                        preview_img = preview_img.convert("RGBA")
+                    if preview_img.mode in ("RGBA", "LA"):
+                        background.paste(preview_img, mask=preview_img.split()[-1])
+                        preview_img = background
+                else:
+                    preview_img = preview_img.convert("RGB")
+
+                preview_buf = io.BytesIO()
+                preview_img.save(preview_buf, format="JPEG", quality=85)
+                preview_bytes = preview_buf.getvalue()
+                prev_width, prev_height = preview_img.size
+
+                prev_input = BufferedInputFile(preview_bytes, filename=f"preview_{file.filename}")
+                prev_sent = await bot.send_photo(
+                    chat_id=settings.CHANNEL_ID,
+                    photo=prev_input,
+                    caption=f"Preview: {file.filename}",
+                )
+                prev_file_id = prev_sent.photo[-1].file_id
+                prev_file_unique_id = prev_sent.photo[-1].file_unique_id
+                prev_mime = "image/jpeg"
             else:
-                preview_img = preview_img.convert("RGB")
-
-            preview_buf = io.BytesIO()
-            preview_img.save(preview_buf, format="JPEG", quality=85)
-            preview_bytes = preview_buf.getvalue()
-            prev_width, prev_height = preview_img.size
-
-            prev_input = BufferedInputFile(preview_bytes, filename=f"preview_{file.filename}")
-            prev_sent = await bot.send_photo(
-                chat_id=settings.CHANNEL_ID,
-                photo=prev_input,
-                caption=f"Preview: {file.filename}",
-            )
-            prev_file_id = prev_sent.photo[-1].file_id
-            prev_file_unique_id = prev_sent.photo[-1].file_unique_id
-            prev_mime = "image/jpeg"
+                preview_bytes = b""
+                prev_file_id = prev_file_unique_id = None
+                prev_width = prev_height = None
+                prev_mime = None
         else:
             orig_input = BufferedInputFile(content, filename=file.filename)
             sent = await bot.send_video(
@@ -141,6 +149,7 @@ async def upload_media(
     session.add(asset)
     await session.flush()
 
+    # Always retain the uploaded file as ORIGINAL so delivery can send it.
     link = ContentItemMedia(
         content_item_id=content_item_id,
         media_asset_id=asset.id,
@@ -148,7 +157,23 @@ async def upload_media(
     )
     session.add(link)
 
-    if file_type == MediaType.PHOTO and prev_file_id:
+    # MAIN and PREVIEW are explicit display roles. Keep only one link for each
+    # singleton role so the API never silently displays a stale previous file.
+    if role in (FileRole.MAIN, FileRole.PREVIEW):
+        await session.execute(
+            delete(ContentItemMedia).where(
+                ContentItemMedia.content_item_id == content_item_id,
+                ContentItemMedia.role == role,
+            )
+        )
+        session.add(ContentItemMedia(
+            content_item_id=content_item_id,
+            media_asset_id=asset.id,
+            role=role,
+            position=0,
+        ))
+
+    if file_type == MediaType.PHOTO and prev_file_id and role != FileRole.PREVIEW:
         existing_preview = await session.execute(
             select(ContentItemMedia.id).where(
                 ContentItemMedia.content_item_id == content_item_id,

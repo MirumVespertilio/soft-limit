@@ -508,7 +508,7 @@ async function loadAdminWheel() {
             '<select id="segment-content-item"></select>' +
             '<input type="text" id="segment-label" placeholder="Подпись">' +
             '<input type="number" id="segment-weight" placeholder="Вес" value="1" min="1">' +
-            '<input type="number" id="segment-position" placeholder="Позиция" value="0">' +
+            '<input type="number" id="segment-position" placeholder="Позиция (пусто = авто)">' +
             '<button class="btn btn-primary" onclick="addSegment()">Добавить</button>' +
             '<h3 style="margin-top:20px">Колеса</h3>';
 
@@ -522,7 +522,7 @@ async function loadAdminWheel() {
                 data.segments.forEach(seg => {
                     const div = document.createElement('div');
                     div.className = 'admin-card';
-                    div.innerHTML = `<p><strong>${seg.label}</p><p>Вес: ${seg.weight} | Позиция: ${seg.content_item_id}</p>`;
+                    div.innerHTML = `<p><strong>${seg.label}</strong></p><p>Вес: ${seg.weight} | Позиция: ${seg.position}</p>`;
                     segContainer.appendChild(div);
                 });
             }
@@ -554,7 +554,12 @@ async function addSegment() {
     const content_item_id = parseInt(document.getElementById('segment-content-item').value);
     const label = document.getElementById('segment-label').value;
     const weight = parseInt(document.getElementById('segment-weight').value);
-    const position = parseInt(document.getElementById('segment-position').value);
+    const positionText = document.getElementById('segment-position').value.trim();
+    const position = positionText === '' ? null : Number(positionText);
+    if (position !== null && (!Number.isInteger(position) || position < 0)) {
+        alert('Позиция должна быть целым неотрицательным числом');
+        return;
+    }
 
     try {
         const wheelsResponse = await api('/admin/wheels');
@@ -562,14 +567,20 @@ async function addSegment() {
         const wheel = wheels.wheels.find(w => w.status === 'active');
         if (!wheel) { alert('Нет активного колеса'); return; }
 
-        await api(`/admin/wheels/${wheel.id}/segments`, {
+        const response = await api(`/admin/wheels/${wheel.id}/segments`, {
             method: 'POST',
             body: JSON.stringify({ content_item_id, label, weight, position }),
         });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            alert(errorData.detail || `Не удалось добавить сектор (${response.status})`);
+            return;
+        }
+        document.getElementById('segment-position').value = '';
         alert('Сектор добавлен');
-        loadAdminWheel();
+        await loadAdminWheel();
     } catch (e) {
-        alert('Ошибка');
+        alert(e.message || 'Ошибка соединения');
     }
 }
 
