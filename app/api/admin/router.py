@@ -314,6 +314,52 @@ class SegmentUpdateRequest(BaseModel):
     segments: list[dict]
 
 
+class SegmentAddRequest(BaseModel):
+    content_item_id: int
+    label: str
+    weight: int
+    position: int
+
+
+@router.post("/wheels/{wheel_id}/segments")
+async def add_wheel_segment(
+    wheel_id: int,
+    request: SegmentAddRequest,
+    admin_id: int = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    wheel = await session.get(Wheel, wheel_id)
+    if not wheel:
+        raise HTTPException(status_code=404, detail="Wheel not found")
+
+    if request.weight <= 0:
+        raise HTTPException(status_code=400, detail="Weight must be positive")
+
+    content_item = await session.get(ContentItem, request.content_item_id)
+    if not content_item:
+        raise HTTPException(status_code=400, detail="Content item not found")
+
+    existing_result = await session.execute(
+        select(WheelSegment.position).where(WheelSegment.wheel_id == wheel_id)
+    )
+    existing_positions = {row[0] for row in existing_result.all()}
+
+    if request.position in existing_positions:
+        raise HTTPException(status_code=400, detail="Position already taken")
+
+    segment = WheelSegment(
+        wheel_id=wheel_id,
+        content_item_id=request.content_item_id,
+        label=request.label,
+        weight=request.weight,
+        is_active=True,
+        position=request.position,
+    )
+    session.add(segment)
+    await session.commit()
+    return {"id": segment.id}
+
+
 @router.put("/wheels/{wheel_id}/segments")
 async def update_wheel_segments(
     wheel_id: int,
@@ -370,11 +416,11 @@ async def update_wheel_segments(
                 )
 
     temp_offset = 10000
-    for i, seg_data in enumerate(request.segments):
+    for seg in existing_segments.values():
         await session.execute(
             update(WheelSegment)
-            .where(WheelSegment.wheel_id == wheel_id)
-            .values(position=WheelSegment.position + temp_offset + i)
+            .where(WheelSegment.id == seg.id)
+            .values(position=seg.position + temp_offset)
         )
 
     for seg_data in request.segments:
@@ -382,24 +428,15 @@ async def update_wheel_segments(
         if seg_id is not None:
             seg = existing_segments.get(seg_id)
             if seg and seg.id in used_segment_ids:
-                await session.execute(
-                    update(WheelSegment).where(WheelSegment.id == seg_id).values(
-                        label=seg_data["label"],
-                        weight=seg_data["weight"],
-                        is_active=seg_data.get("is_active", True),
-                        position=seg_data["position"],
-                    )
-                )
-            else:
-                new_seg = WheelSegment(
-                    wheel_id=wheel_id,
-                    content_item_id=seg_data["content_item_id"],
+                continue
+            await session.execute(
+                update(WheelSegment).where(WheelSegment.id == seg_id).values(
                     label=seg_data["label"],
                     weight=seg_data["weight"],
                     is_active=seg_data.get("is_active", True),
                     position=seg_data["position"],
                 )
-                session.add(new_seg)
+            )
         else:
             segment = WheelSegment(
                 wheel_id=wheel_id,
@@ -410,8 +447,6 @@ async def update_wheel_segments(
                 position=seg_data["position"],
             )
             session.add(segment)
-
-    await session.flush()
 
     await session.commit()
     return {"updated": True}

@@ -167,14 +167,16 @@ function updateSpinButton() {
     btn.textContent = isSpinning ? 'Крутится...' : 'Крутить';
 }
 
-let pendingSpinKey = null;
-
 async function spin() {
     if (isSpinning) return;
     isSpinning = true;
     updateSpinButton();
 
-    const idempotencyKey = pendingSpinKey || crypto.randomUUID();
+    let idempotencyKey = localStorage.getItem('pending_spin_key');
+    if (!idempotencyKey) {
+        idempotencyKey = crypto.randomUUID();
+        localStorage.setItem('pending_spin_key', idempotencyKey);
+    }
 
     try {
         const response = await api('/spins', {
@@ -184,7 +186,7 @@ async function spin() {
         const result = await response.json();
 
         if (response.ok) {
-            pendingSpinKey = null;
+            localStorage.removeItem('pending_spin_key');
             await animateWheel(result.segment_id, result.content_item_id);
             showResult(result);
             loadBalances();
@@ -193,7 +195,6 @@ async function spin() {
         }
     } catch (e) {
         console.error('Spin failed:', e);
-        pendingSpinKey = idempotencyKey;
         alert('Ошибка соединения. Повторите попытку.');
     } finally {
         isSpinning = false;
@@ -389,10 +390,12 @@ async function loadShop() {
     }
 }
 
-const pendingPurchaseKeys = {};
-
 async function buyPackage(packageId) {
-    const idempotencyKey = pendingPurchaseKeys[packageId] || crypto.randomUUID();
+    let idempotencyKey = localStorage.getItem(`pending_purchase_${packageId}`);
+    if (!idempotencyKey) {
+        idempotencyKey = crypto.randomUUID();
+        localStorage.setItem(`pending_purchase_${packageId}`, idempotencyKey);
+    }
 
     try {
         const response = await api('/spin-purchases', {
@@ -400,7 +403,7 @@ async function buyPackage(packageId) {
             body: JSON.stringify({ package_id: packageId, idempotency_key: idempotencyKey }),
         });
         if (response.ok) {
-            pendingPurchaseKeys[packageId] = null;
+            localStorage.removeItem(`pending_purchase_${packageId}`);
             alert('Пакет куплен!');
             loadBalances();
         } else {
@@ -408,7 +411,6 @@ async function buyPackage(packageId) {
             alert(data.detail || 'Ошибка');
         }
     } catch (e) {
-        pendingPurchaseKeys[packageId] = idempotencyKey;
         alert('Ошибка соединения. Повторите попытку.');
     }
 }
@@ -637,7 +639,7 @@ async function loadAdminWelcomePool() {
     try {
         const resp = await api('/admin/welcome-pool');
         const data = await resp.json();
-        const container = document.getElementById('admin-welcome-pool');
+        const container = document.getElementById('admin-welcome');
         container.innerHTML = '<h3>Приветственный пул</h3><select id="welcome-item-select" multiple size="5"></select>' +
             '<button class="btn btn-primary" onclick="saveWelcomePool()">Сохранить</button>';
 

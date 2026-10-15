@@ -10,6 +10,7 @@ from app.db import Base
 
 class DeliveryStatus(PyEnum):
     PENDING = "pending"
+    PROCESSING = "processing"
     SENT = "sent"
     FAILED = "failed"
 

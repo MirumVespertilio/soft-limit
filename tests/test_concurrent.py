@@ -18,6 +18,7 @@ from app.models.content import ContentItem, ContentStatus, MediaType, ContentIte
 from app.models.wheel import Wheel, WheelSegment
 from app.models.welcome import WelcomeRewardItem
 from app.models.purchases import SpinPackage
+from app.models.wallet import UserWallet
 from tests.test_auth import generate_init_data
 
 
@@ -150,3 +151,60 @@ async def test_delivery_bot_called_once(mock_bot_cls, concurrent_client, concurr
     await client.post(f"/api/v1/inventory/{inv_id}/deliver", headers={"Authorization": f"Bearer {token}"})
 
     assert mock_bot.send_document.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_spin_response_statuses(concurrent_client, concurrent_engine):
+    client = concurrent_client
+    token = await _create_user(client, 999999)
+
+    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        item_id = await _setup_wheel(session)
+        session.add(WelcomeRewardItem(content_item_id=item_id))
+        await session.commit()
+
+    r1 = await client.post(
+        "/api/v1/spins",
+        json={"idempotency_key": "status-test-1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r1.status_code == 200
+
+    r2 = await client.post(
+        "/api/v1/spins",
+        json={"idempotency_key": "status-test-2"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r2.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_purchase_response_statuses(concurrent_client, concurrent_engine):
+    client = concurrent_client
+    token = await _create_user(client, 101010)
+
+    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        item_id = await _setup_wheel(session)
+        session.add(WelcomeRewardItem(content_item_id=item_id))
+        session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
+        await session.commit()
+
+    r1 = await client.post(
+        "/api/v1/spin-purchases",
+        json={"package_id": 1, "idempotency_key": "pur-status-1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r1.status_code == 400
+
+    wallet = await session.execute(select(UserWallet))
+    wallet.scalars().first().test_stars_balance = 10
+    await session.commit()
+
+    r2 = await client.post(
+        "/api/v1/spin-purchases",
+        json={"package_id": 1, "idempotency_key": "pur-status-2"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r2.status_code == 200

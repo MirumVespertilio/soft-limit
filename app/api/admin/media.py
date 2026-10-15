@@ -148,6 +148,21 @@ async def upload_media(
     )
     session.add(link)
 
+    if role == FileRole.MAIN:
+        existing_main = await session.execute(
+            select(ContentItemMedia.id).where(
+                ContentItemMedia.content_item_id == content_item_id,
+                ContentItemMedia.role == FileRole.MAIN,
+            ).limit(1)
+        )
+        if not existing_main.scalars().first():
+            main_link = ContentItemMedia(
+                content_item_id=content_item_id,
+                media_asset_id=asset.id,
+                role=FileRole.MAIN,
+            )
+            session.add(main_link)
+
     if file_type == MediaType.PHOTO and prev_file_id:
         existing_preview = await session.execute(
             select(ContentItemMedia.id).where(

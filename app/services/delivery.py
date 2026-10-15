@@ -87,9 +87,9 @@ async def execute_delivery(
         update(MediaDelivery)
         .where(
             MediaDelivery.id == delivery_id,
-            MediaDelivery.status == DeliveryStatus.PENDING,
+            MediaDelivery.status.in_([DeliveryStatus.PENDING, DeliveryStatus.FAILED]),
         )
-        .values(status="processing")
+        .values(status=DeliveryStatus.PROCESSING)
     )
     if capture_result.rowcount == 0:
         existing = await session.get(MediaDelivery, delivery_id)
