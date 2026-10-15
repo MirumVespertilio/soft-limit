@@ -20,12 +20,17 @@ async def deliver_item(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    if delivery.status == DeliveryStatus.SENT:
+        return {"delivery_id": delivery.id, "status": delivery.status.value}
+
     from aiogram import Bot
     from app.config import settings
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-
-    delivery = await execute_delivery(session, bot, delivery.id)
-    await session.commit()
+    try:
+        delivery = await execute_delivery(session, bot, delivery.id)
+        await session.commit()
+    finally:
+        await bot.session.close()
 
     return {
         "delivery_id": delivery.id,

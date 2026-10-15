@@ -70,16 +70,32 @@ async def upload_media(
 
     try:
         if file_type == MediaType.PHOTO:
-            sent = await bot.send_photo(
-                chat_id=settings.CHANNEL_ID,
-                photo=content,
-                caption=f"Upload: {file.filename}",
-            )
-            telegram_file_id = sent.photo[-1].file_id
-            telegram_file_unique_id = sent.photo[-1].file_unique_id
-            orig_width, orig_height = Image.open(io.BytesIO(content)).size
-
             img = Image.open(io.BytesIO(content))
+            orig_width, orig_height = img.size
+
+            img_for_doc = img.copy()
+            if img_for_doc.mode in ("RGBA", "LA", "P"):
+                background = Image.new("RGB", img_for_doc.size, (255, 255, 255))
+                if img_for_doc.mode == "P":
+                    img_for_doc = img_for_doc.convert("RGBA")
+                if img_for_doc.mode in ("RGBA", "LA"):
+                    background.paste(img_for_doc, mask=img_for_doc.split()[-1])
+                    img_for_doc = background
+            else:
+                img_for_doc = img_for_doc.convert("RGB")
+
+            doc_buf = io.BytesIO()
+            img_for_doc.save(doc_buf, format="JPEG", quality=92)
+            doc_buf.seek(0)
+
+            sent = await bot.send_document(
+                chat_id=settings.CHANNEL_ID,
+                document=doc_buf,
+                caption=f"Original: {file.filename}",
+            )
+            telegram_file_id = sent.document.file_id
+            telegram_file_unique_id = sent.document.file_unique_id
+
             img.thumbnail((320, 320))
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=85)
@@ -123,30 +139,37 @@ async def upload_media(
     link = ContentItemMedia(
         content_item_id=content_item_id,
         media_asset_id=asset.id,
-        role=FileRole.ORIGINAL if role == FileRole.MAIN else role,
+        role=FileRole.ORIGINAL,
     )
     session.add(link)
 
     if file_type == MediaType.PHOTO and prev_file_id:
-        preview_asset = MediaAsset(
-            file_type=MediaType.PHOTO,
-            telegram_file_id=prev_file_id,
-            telegram_file_unique_id=prev_file_unique_id,
-            mime_type="image/jpeg",
-            file_size=len(preview_content),
-            file_name=f"preview_{file.filename}",
-            width=prev_width,
-            height=prev_height,
+        existing_preview = await session.execute(
+            select(ContentItemMedia.id).where(
+                ContentItemMedia.content_item_id == content_item_id,
+                ContentItemMedia.role == FileRole.PREVIEW,
+            ).limit(1)
         )
-        session.add(preview_asset)
-        await session.flush()
+        if not existing_preview.scalars().first():
+            preview_asset = MediaAsset(
+                file_type=MediaType.PHOTO,
+                telegram_file_id=prev_file_id,
+                telegram_file_unique_id=prev_file_unique_id,
+                mime_type="image/jpeg",
+                file_size=len(preview_content),
+                file_name=f"preview_{file.filename}",
+                width=prev_width,
+                height=prev_height,
+            )
+            session.add(preview_asset)
+            await session.flush()
 
-        preview_link = ContentItemMedia(
-            content_item_id=content_item_id,
-            media_asset_id=preview_asset.id,
-            role=FileRole.PREVIEW,
-        )
-        session.add(preview_link)
+            preview_link = ContentItemMedia(
+                content_item_id=content_item_id,
+                media_asset_id=preview_asset.id,
+                role=FileRole.PREVIEW,
+            )
+            session.add(preview_link)
 
     await session.commit()
 

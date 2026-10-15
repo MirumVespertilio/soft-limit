@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -241,22 +241,36 @@ async def update_welcome_pool(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    await session.execute(WelcomeRewardItem.__table__.delete())
-
     wheel_result = await session.execute(
-        select(WheelSegment.content_item_id).where(
-            WheelSegment.is_active == True,
-        ).distinct()
+        select(Wheel).where(Wheel.status == "active").limit(1)
     )
-    wheel_item_ids = {row[0] for row in wheel_result.all()}
+    wheel = wheel_result.scalars().first()
+    if not wheel:
+        raise HTTPException(status_code=400, detail="No active wheel")
+
+    valid_items_result = await session.execute(
+        select(WheelSegment.content_item_id)
+        .join(ContentItem, WheelSegment.content_item_id == ContentItem.id)
+        .where(
+            WheelSegment.wheel_id == wheel.id,
+            WheelSegment.is_active == True,
+            ContentItem.status == ContentStatus.PUBLISHED,
+        )
+        .distinct()
+    )
+    valid_item_ids = {row[0] for row in valid_items_result.all()}
 
     for item_id in request.content_item_ids:
-        if item_id not in wheel_item_ids:
+        if item_id not in valid_item_ids:
             raise HTTPException(
                 status_code=400,
-                detail=f"Content item {item_id} is not in active wheel",
+                detail=f"Content item {item_id} is not a published card in active wheel",
             )
-        session.add(WelcomeRewardItem(content_item_id=item_id))
+
+    await session.execute(WelcomeRewardItem.__table__.delete())
+
+    for position, item_id in enumerate(request.content_item_ids):
+        session.add(WelcomeRewardItem(content_item_id=item_id, position=position))
 
     await session.commit()
     return {"updated": True}
@@ -304,11 +318,21 @@ async def update_wheel_segments(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    from app.models.spin import Spin
-
     wheel = await session.get(Wheel, wheel_id)
     if not wheel:
         raise HTTPException(status_code=404, detail="Wheel not found")
+
+    positions = [s["position"] for s in request.segments]
+    if len(positions) != len(set(positions)):
+        raise HTTPException(status_code=400, detail="Duplicate positions in segments")
+
+    for seg_data in request.segments:
+        if seg_data.get("weight", 0) <= 0:
+            raise HTTPException(status_code=400, detail="Weight must be positive")
+
+        content_item = await session.get(ContentItem, seg_data["content_item_id"])
+        if not content_item:
+            raise HTTPException(status_code=400, detail="Content item not found")
 
     existing_result = await session.execute(
         select(WheelSegment).where(WheelSegment.wheel_id == wheel_id)

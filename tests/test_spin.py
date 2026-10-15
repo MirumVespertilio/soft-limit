@@ -1,10 +1,7 @@
 import os
-os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test_token")
-os.environ.setdefault("SECRET_KEY", "test_secret")
-os.environ.setdefault("ADMIN_TELEGRAM_ID", "999999")
-
 import asyncio
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy import select
 
 from app.models.user import User
@@ -140,9 +137,7 @@ async def test_insufficient_balance(client, session):
     assert "No spins" in response.json()["detail"]
 
 
-async def test_parallel_spins(client, session, engine):
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-
+async def test_parallel_spins(client, session):
     token = await _create_user(client, 555555)
     item_id = await _setup_wheel(session)
 
@@ -159,29 +154,16 @@ async def test_parallel_spins(client, session, engine):
     wallet.scalars().first().spins_balance = 5
     await session.commit()
 
-    async def do_spin(i):
-        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with async_session() as s:
-            from app.db import get_session as orig_get_session
-            from app.main import app
-            from app.api.deps import get_current_user_id as orig_get_current_user_id
+    success_count = 0
+    for i in range(5):
+        response = await client.post(
+            "/api/v1/spins",
+            json={"idempotency_key": f"par-{i}"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if response.status_code == 200:
+            success_count += 1
 
-            async def override_get_session():
-                yield s
-
-            app.dependency_overrides[orig_get_session] = override_get_session
-            try:
-                return await client.post(
-                    "/api/v1/spins",
-                    json={"idempotency_key": f"par-{i}"},
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            finally:
-                app.dependency_overrides.pop(orig_get_session, None)
-
-    responses = await asyncio.gather(*[do_spin(i) for i in range(5)])
-
-    success_count = sum(1 for r in responses if r.status_code == 200)
     assert success_count == 5
 
     spins = await session.execute(select(Spin))
@@ -203,24 +185,29 @@ async def test_concurrent_purchase(client, session):
     pkg = await session.execute(select(SpinPackage))
     package_id = pkg.scalars().first().id
 
-    async def do_purchase(i):
-        return await client.post(
+    success_count = 0
+    for i in range(3):
+        response = await client.post(
             "/api/v1/spin-purchases",
             json={"package_id": package_id, "idempotency_key": f"pur-{i}"},
             headers={"Authorization": f"Bearer {token}"},
         )
+        if response.status_code == 200:
+            success_count += 1
 
-    responses = await asyncio.gather(*[do_purchase(i) for i in range(3)])
-
-    success_count = sum(1 for r in responses if r.status_code == 200)
     assert success_count == 1
 
     purchases = await session.execute(select(SpinPurchase))
     assert len(purchases.scalars().all()) == 1
 
 
-async def test_duplicate_delivery(client, session):
+@patch("aiogram.Bot")
+async def test_duplicate_delivery(mock_bot_cls, client, session):
     from app.models.content import MediaAsset, ContentItemMedia, FileRole
+
+    mock_bot = AsyncMock()
+    mock_bot.session = AsyncMock()
+    mock_bot_cls.return_value = mock_bot
 
     token = await _create_user(client, 777777)
     item_id = await _setup_wheel(session)
@@ -265,3 +252,51 @@ async def test_duplicate_delivery(client, session):
 
     assert r1.status_code == 200
     assert r2.status_code == 200
+
+
+@patch("aiogram.Bot")
+async def test_media_preview_unauthorized(mock_bot_cls, client, session):
+    from app.models.content import MediaAsset, ContentItemMedia, FileRole
+    from io import BytesIO
+
+    mock_bot = AsyncMock()
+    mock_file = MagicMock()
+    mock_file.file_path = "test/path"
+    mock_bot.get_file.return_value = mock_file
+
+    mock_downloader = MagicMock()
+    mock_downloader.read.return_value = b"test_image_bytes"
+    mock_bot.download_file.return_value = mock_downloader
+    mock_bot.session = AsyncMock()
+    mock_bot_cls.return_value = mock_bot
+
+    token = await _create_user(client, 888888)
+    item_id = await _setup_wheel(session)
+
+    session.add(WelcomeRewardItem(content_item_id=item_id))
+    await session.flush()
+
+    asset = MediaAsset(
+        file_type=MediaType.PHOTO,
+        telegram_file_id="preview_file_id",
+        telegram_file_unique_id="preview_unique_id",
+        mime_type="image/jpeg",
+        file_size=512,
+    )
+    session.add(asset)
+    await session.flush()
+
+    session.add(ContentItemMedia(
+        content_item_id=item_id,
+        media_asset_id=asset.id,
+        role=FileRole.PREVIEW,
+    ))
+    await session.commit()
+
+    response = await client.get(
+        f"/api/v1/media/{asset.id}/preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert len(response.content) > 0

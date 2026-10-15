@@ -14,16 +14,15 @@ async def request_delivery(
     user_id: int,
     inventory_id: int,
 ) -> MediaDelivery:
+    from sqlalchemy.exc import IntegrityError
+
     result = await session.execute(
-        select(MediaDelivery).where(
-            MediaDelivery.inventory_id == inventory_id,
-            MediaDelivery.user_id == user_id,
-        )
+        select(MediaDelivery).where(MediaDelivery.inventory_id == inventory_id)
     )
     delivery = result.scalar_one_or_none()
     if delivery:
-        if delivery.status == DeliveryStatus.SENT:
-            return delivery
+        if delivery.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
         return delivery
 
     inv_result = await session.execute(
@@ -46,7 +45,17 @@ async def request_delivery(
         status=DeliveryStatus.PENDING,
     )
     session.add(delivery)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        result = await session.execute(
+            select(MediaDelivery).where(MediaDelivery.inventory_id == inventory_id)
+        )
+        existing = result.scalar_one_or_none()
+        if existing and existing.user_id == user_id:
+            return existing
+        raise HTTPException(status_code=403, detail="Access denied")
     return delivery
 
 
