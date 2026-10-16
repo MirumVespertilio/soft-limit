@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin
 from app.db import get_session
 from app.models.user import User
+from app.models.role import UserRole, RoleType
 from app.models.wallet import UserWallet, TransactionResource, TransactionReason
 from app.models.spin import Spin
 from app.models.purchases import SpinPurchase
@@ -521,3 +522,54 @@ async def update_wheel_segments(
 
     await session.commit()
     return {"updated": True}
+
+
+class RoleAssignRequest(BaseModel):
+    """Тело запроса для назначения/отзыва роли admin."""
+    user_id: int
+    role: str  # "user" | "admin"
+
+
+@router.post("/assign")
+async def assign_role(
+    request: RoleAssignRequest,
+    admin_id: int = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Назначить роль пользователю (admin или user).
+
+    Только пользователи с ролью admin могут вызывать этот эндпоинт.
+    При назначении admin-роли создаётся или обновляется запись в user_roles.
+    """
+    # Валидация допустимых значений роли
+    try:
+        new_role = RoleType(request.role)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{request.role}'. Allowed: user, admin",
+        )
+
+    # Проверяем, что пользователь существует
+    user = await session.get(User, request.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Обновляем или создаём запись роли
+    role_result = await session.execute(
+        select(UserRole).where(UserRole.user_id == request.user_id)
+    )
+    role_row = role_result.scalar_one_or_none()
+
+    if role_row:
+        role_row.role = new_role
+    else:
+        role_row = UserRole(user_id=request.user_id, role=new_role)
+        session.add(role_row)
+
+    await session.commit()
+    return {
+        "user_id": request.user_id,
+        "role": new_role.value,
+        "message": f"Role '{new_role.value}' assigned successfully",
+    }

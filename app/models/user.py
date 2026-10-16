@@ -19,3 +19,4 @@ class User(Base):
     welcome_spin_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     wallet: Mapped["UserWallet"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    role: Mapped["UserRole"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")

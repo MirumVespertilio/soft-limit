@@ -1,4 +1,5 @@
 from app.models.user import User
+from app.models.role import UserRole, RoleType
 from app.models.wallet import UserWallet, WalletTransaction, TransactionResource, TransactionReason
 from app.models.content import MediaAsset, ContentItem, ContentItemMedia, FileRole
 from app.models.wheel import Wheel, WheelSegment
@@ -12,6 +13,8 @@ from app.models.order import Order, OrderStatus, PaymentAttempt, PaymentProvider
 
 __all__ = [
     "User",
+    "UserRole",
+    "RoleType",
     "UserWallet",
     "WalletTransaction",
     "TransactionResource",
