@@ -66,10 +66,10 @@ async def upload_media(
     if role == FileRole.PREVIEW and file_type != MediaType.PHOTO:
         raise HTTPException(status_code=400, detail="Preview must be an image; upload a video as Main")
 
-    from aiogram import Bot
     from app.config import settings
+    from app.telegram import create_telegram_bot
 
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    bot = create_telegram_bot()
 
     try:
         if file_type == MediaType.PHOTO:

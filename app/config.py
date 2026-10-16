@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     CHANNEL_ID: str = ""
     APP_BASE_URL: str = ""
+    TELEGRAM_PROXY_URL: str = ""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

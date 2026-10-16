@@ -1,16 +1,17 @@
 import asyncio
 
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher
 from aiogram.types import WebAppInfo
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.enums import ParseMode
 
 from app.config import settings
+from app.telegram import create_telegram_bot
 
 
 async def main() -> None:
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    bot = create_telegram_bot()
     dp = Dispatcher()
 
     @dp.message(CommandStart())

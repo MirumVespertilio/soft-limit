@@ -23,9 +23,8 @@ async def deliver_item(
     if delivery.status == DeliveryStatus.SENT:
         return {"delivery_id": delivery.id, "status": delivery.status.value}
 
-    from aiogram import Bot
-    from app.config import settings
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    from app.telegram import create_telegram_bot
+    bot = create_telegram_bot()
     try:
         delivery = await execute_delivery(session, bot, delivery.id)
         await session.commit()

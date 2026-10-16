@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "aiogram>=3.13.0",
+    "aiohttp-socks>=0.10.2",
     "sqlalchemy[asyncio]>=2.0.35",
     "aiosqlite>=0.20.0",
     "alembic>=1.13.0",
