@@ -16,6 +16,8 @@ from app.api.admin.router import router as admin_router
 from app.api.admin.content import router as admin_content_router
 from app.api.admin.media import router as admin_media_router
 from app.api.media.router import router as media_router
+from app.api.models.router import router as models_router
+from app.api.webhook.router import router as webhook_router
 
 
 @asynccontextmanager
@@ -47,6 +49,8 @@ app.include_router(admin_router)
 app.include_router(admin_content_router)
 app.include_router(admin_media_router)
 app.include_router(media_router)
+app.include_router(models_router)
+app.include_router(webhook_router)
 
 
 @app.get("/")

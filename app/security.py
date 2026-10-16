@@ -48,23 +48,26 @@ def verify_telegram_init_data(init_data: str) -> dict:
     return user_data
 
 
-def create_access_token(telegram_id: int, role: str = "user") -> str:
-    """Создать JWT с telegram_id и ролью пользователя."""
+def create_access_token(telegram_id: int, role: str = "user", model_id: int | None = None) -> str:
+    """Создать JWT с telegram_id, ролью пользователя и опциональным model_id."""
     payload = {
         "sub": str(telegram_id),
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(days=7),
     }
+    if model_id is not None:
+        payload["model_id"] = model_id
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
 
 def decode_access_token(token: str) -> dict:
-    """Декодировать JWT и вернуть {"telegram_id": int, "role": str}."""
+    """Декодировать JWT и вернуть {"telegram_id": int, "role": str, "model_id": int | None}."""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         return {
             "telegram_id": int(payload["sub"]),
             "role": payload.get("role", "user"),
+            "model_id": payload.get("model_id"),
         }
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")

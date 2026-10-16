@@ -26,6 +26,7 @@ class CurrentUser:
     id: int
     telegram_id: int
     role: str  # "user" | "admin"
+    model_id: int | None = None
 
 
 async def get_current_user(
@@ -38,6 +39,7 @@ async def get_current_user(
 
     token_data = decode_access_token(credentials.credentials)
     telegram_id: int = token_data["telegram_id"]
+    model_id: int | None = token_data.get("model_id")
 
     result = await session.execute(
         select(User).where(User.telegram_id == telegram_id)
@@ -53,7 +55,7 @@ async def get_current_user(
     role_row = role_result.scalar_one_or_none()
     role = role_row.role.value if role_row else RoleType.USER.value
 
-    return CurrentUser(id=user.id, telegram_id=telegram_id, role=role)
+    return CurrentUser(id=user.id, telegram_id=telegram_id, role=role, model_id=model_id)
 
 
 async def require_admin(

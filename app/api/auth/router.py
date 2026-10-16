@@ -24,18 +24,21 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 class AuthRequest(BaseModel):
     init_data: str
+    model_id: int | None = None
 
 
 class AuthResponse(BaseModel):
     access_token: str
     is_new: bool
     role: str
+    model_id: int | None = None
 
 
 class MeResponse(BaseModel):
     id: int
     telegram_id: int
     role: str
+    model_id: int | None = None
 
 
 @router.post("/telegram", response_model=AuthResponse)
@@ -88,17 +91,19 @@ async def telegram_auth(request: AuthRequest, session: AsyncSession = Depends(ge
     await session.commit()
 
     return AuthResponse(
-        access_token=create_access_token(telegram_id, role=role),
+        access_token=create_access_token(telegram_id, role=role, model_id=request.model_id),
         is_new=is_new,
         role=role,
+        model_id=request.model_id,
     )
 
 
 @router.get("/me", response_model=MeResponse)
 async def me(current_user: CurrentUser = Depends(get_current_user)):
-    """Вернуть профиль текущего пользователя с его ролью."""
+    """Вернуть профиль текущего пользователя с его ролью и контекстом модели."""
     return MeResponse(
         id=current_user.id,
         telegram_id=current_user.telegram_id,
         role=current_user.role,
+        model_id=current_user.model_id,
     )

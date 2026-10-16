@@ -1,5 +1,6 @@
 from app.models.user import User
 from app.models.role import UserRole, RoleType
+from app.models.model import Model
 from app.models.wallet import UserWallet, WalletTransaction, TransactionResource, TransactionReason, GemPackage, GemPurchase
 from app.models.content import MediaAsset, ContentItem, ContentItemMedia, FileRole
 from app.models.wheel import Wheel, WheelSegment
@@ -15,6 +16,7 @@ __all__ = [
     "User",
     "UserRole",
     "RoleType",
+    "Model",
     "UserWallet",
     "WalletTransaction",
     "TransactionResource",

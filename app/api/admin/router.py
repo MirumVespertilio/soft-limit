@@ -3,10 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin
+from app.api.deps import get_current_admin, require_admin, CurrentUser
 from app.db import get_session
 from app.models.user import User
 from app.models.role import UserRole, RoleType
+from app.models.model import Model
 from app.models.wallet import UserWallet, TransactionResource, TransactionReason, GemPackage, GemPurchase
 from app.models.spin import Spin
 from app.models.purchases import SpinPurchase
@@ -639,3 +640,141 @@ async def assign_role(
         "role": new_role.value,
         "message": f"Role '{new_role.value}' assigned successfully",
     }
+
+
+# ==============================================================================
+# Управление моделями (Multi-tenant SaaS)
+# ==============================================================================
+
+class ModelCreateRequest(BaseModel):
+    name: str
+    bot_token: str | None = None
+    theme_json: str | None = None
+
+
+class ModelUpdateRequest(BaseModel):
+    name: str | None = None
+    bot_token: str | None = None
+    theme_json: str | None = None
+
+
+class ModelResponse(BaseModel):
+    id: int
+    name: str
+    owner_user_id: int
+    bot_token: str | None = None
+    theme_json: str | None = None
+    created_at: str | None = None
+
+
+@router.get("/models")
+async def list_models(
+    current_user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Список всех моделей, принадлежащих текущему владельцу (admin)."""
+    result = await session.execute(
+        select(Model)
+        .where(Model.owner_user_id == current_user.id)
+        .order_by(Model.id.desc())
+    )
+    models = result.scalars().all()
+    return {
+        "models": [
+            {
+                "id": m.id,
+                "name": m.name,
+                "owner_user_id": m.owner_user_id,
+                "bot_token": m.bot_token,
+                "theme_json": m.theme_json,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in models
+        ]
+    }
+
+
+@router.post("/models", response_model=ModelResponse)
+async def create_model(
+    request: ModelCreateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Создать новую модель под текущим владельцем."""
+    if not request.name.strip():
+        raise HTTPException(status_code=400, detail="Model name cannot be empty")
+
+    model = Model(
+        name=request.name.strip(),
+        owner_user_id=current_user.id,
+        bot_token=request.bot_token.strip() if request.bot_token else None,
+        theme_json=request.theme_json,
+    )
+    session.add(model)
+    await session.commit()
+    await session.refresh(model)
+
+    return ModelResponse(
+        id=model.id,
+        name=model.name,
+        owner_user_id=model.owner_user_id,
+        bot_token=model.bot_token,
+        theme_json=model.theme_json,
+        created_at=model.created_at.isoformat() if model.created_at else None,
+    )
+
+
+@router.get("/models/{model_id}", response_model=ModelResponse)
+async def get_model(
+    model_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Получить информацию о конкретной модели владельца."""
+    model = await session.get(Model, model_id)
+    if not model or model.owner_user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    return ModelResponse(
+        id=model.id,
+        name=model.name,
+        owner_user_id=model.owner_user_id,
+        bot_token=model.bot_token,
+        theme_json=model.theme_json,
+        created_at=model.created_at.isoformat() if model.created_at else None,
+    )
+
+
+@router.patch("/models/{model_id}", response_model=ModelResponse)
+async def update_model(
+    model_id: int,
+    request: ModelUpdateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Обновить параметры модели (имя, bot_token, theme_json)."""
+    model = await session.get(Model, model_id)
+    if not model or model.owner_user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    for key, value in request.model_dump(exclude_unset=True).items():
+        if key == "name" and value is not None:
+            if not value.strip():
+                raise HTTPException(status_code=400, detail="Model name cannot be empty")
+            model.name = value.strip()
+        elif key == "bot_token":
+            model.bot_token = value.strip() if value else None
+        elif key == "theme_json":
+            model.theme_json = value
+
+    await session.commit()
+    await session.refresh(model)
+
+    return ModelResponse(
+        id=model.id,
+        name=model.name,
+        owner_user_id=model.owner_user_id,
+        bot_token=model.bot_token,
+        theme_json=model.theme_json,
+        created_at=model.created_at.isoformat() if model.created_at else None,
+    )
