@@ -175,11 +175,11 @@ async def test_concurrent_purchase(client, session):
     item_id = await _setup_wheel(session)
 
     session.add(WelcomeRewardItem(content_item_id=item_id))
-    session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
+    session.add(SpinPackage(name="Pack", spins_count=10, price_gems=5))
     await session.commit()
 
     wallet = await session.execute(select(UserWallet))
-    wallet.scalars().first().test_stars_balance = 5
+    wallet.scalars().first().gems_balance = 5
     await session.commit()
 
     pkg = await session.execute(select(SpinPackage))

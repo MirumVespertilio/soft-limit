@@ -1,6 +1,6 @@
 from app.models.user import User
 from app.models.role import UserRole, RoleType
-from app.models.wallet import UserWallet, WalletTransaction, TransactionResource, TransactionReason
+from app.models.wallet import UserWallet, WalletTransaction, TransactionResource, TransactionReason, GemPackage, GemPurchase
 from app.models.content import MediaAsset, ContentItem, ContentItemMedia, FileRole
 from app.models.wheel import Wheel, WheelSegment
 from app.models.welcome import WelcomeRewardItem
@@ -19,6 +19,8 @@ __all__ = [
     "WalletTransaction",
     "TransactionResource",
     "TransactionReason",
+    "GemPackage",
+    "GemPurchase",
     "MediaAsset",
     "ContentItem",
     "ContentItemMedia",

@@ -59,7 +59,7 @@ async def telegram_auth(request: AuthRequest, session: AsyncSession = Depends(ge
         await session.flush()
 
         # Создаём кошелёк с приветственным спином
-        wallet = UserWallet(user_id=user.id, test_stars_balance=0, spins_balance=1)
+        wallet = UserWallet(user_id=user.id, gems_balance=0, spins_balance=1)
         session.add(wallet)
         await session.flush()
 

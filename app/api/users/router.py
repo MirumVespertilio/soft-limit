@@ -7,6 +7,7 @@ from app.api.deps import get_current_user_id
 from app.db import get_session
 from app.models.user import User
 from app.models.wallet import UserWallet
+from app.models.role import UserRole, RoleType
 
 router = APIRouter(prefix="/api/v1", tags=["users"])
 
@@ -15,7 +16,7 @@ class MeResponse(BaseModel):
     id: int
     telegram_id: int
     username: str | None
-    test_stars: int
+    gems: int
     spins: int
     is_admin: bool
 
@@ -33,13 +34,18 @@ async def get_me(
         raise ValueError("User not found")
 
     user, wallet = row
-    from app.security import is_admin
+
+    role_result = await session.execute(
+        select(UserRole).where(UserRole.user_id == user.id)
+    )
+    role_row = role_result.scalar_one_or_none()
+    user_is_admin = (role_row.role == RoleType.ADMIN) if role_row else False
 
     return MeResponse(
         id=user.id,
         telegram_id=user.telegram_id,
         username=user.username,
-        test_stars=wallet.test_stars_balance,
+        gems=wallet.gems_balance,
         spins=wallet.spins_balance,
-        is_admin=is_admin(user.telegram_id),
+        is_admin=user_is_admin,
     )

@@ -30,11 +30,11 @@ async def adjust_balance(
     wallet = await get_wallet_by_user_id(session, user_id)
 
     if amount >= 0:
-        if resource == TransactionResource.TEST_STARS:
+        if resource == TransactionResource.GEMS:
             stmt = (
                 update(UserWallet)
                 .where(UserWallet.user_id == user_id)
-                .values(test_stars_balance=UserWallet.test_stars_balance + amount)
+                .values(gems_balance=UserWallet.gems_balance + amount)
             )
         else:
             stmt = (
@@ -46,14 +46,14 @@ async def adjust_balance(
         if result.rowcount == 0:
             raise ValueError("Wallet not found")
     else:
-        if resource == TransactionResource.TEST_STARS:
+        if resource == TransactionResource.GEMS:
             stmt = (
                 update(UserWallet)
                 .where(
                     UserWallet.user_id == user_id,
-                    UserWallet.test_stars_balance >= -amount,
+                    UserWallet.gems_balance >= -amount,
                 )
-                .values(test_stars_balance=UserWallet.test_stars_balance + amount)
+                .values(gems_balance=UserWallet.gems_balance + amount)
             )
         else:
             stmt = (

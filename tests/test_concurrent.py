@@ -90,11 +90,11 @@ async def test_real_concurrent_purchases(concurrent_client, concurrent_engine):
     async with async_session() as session:
         item_id = await _setup_wheel(session)
         session.add(WelcomeRewardItem(content_item_id=item_id))
-        session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
+        session.add(SpinPackage(name="Pack", spins_count=10, price_gems=5))
         await session.commit()
 
         wallet = await session.execute(select(UserWallet))
-        wallet.scalars().first().test_stars_balance = 5
+        wallet.scalars().first().gems_balance = 5
         await session.commit()
 
         pkg = await session.execute(select(SpinPackage))
@@ -188,7 +188,7 @@ async def test_purchase_response_statuses(concurrent_client, concurrent_engine):
     async with async_session() as session:
         item_id = await _setup_wheel(session)
         session.add(WelcomeRewardItem(content_item_id=item_id))
-        session.add(SpinPackage(name="Pack", spins_count=10, price_test_stars=5))
+        session.add(SpinPackage(name="Pack", spins_count=10, price_gems=5))
         await session.commit()
 
     r1 = await client.post(
@@ -199,7 +199,7 @@ async def test_purchase_response_statuses(concurrent_client, concurrent_engine):
     assert r1.status_code == 400
 
     wallet = await session.execute(select(UserWallet))
-    wallet.scalars().first().test_stars_balance = 10
+    wallet.scalars().first().gems_balance = 10
     await session.commit()
 
     r2 = await client.post(
