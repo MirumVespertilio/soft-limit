@@ -44,6 +44,22 @@ class MediaAsset(Base):
     content_links: Mapped[list["ContentItemMedia"]] = relationship(back_populates="media", cascade="all, delete-orphan")
 
 
+class Rarity(PyEnum):
+    RARE = "rare"
+    LEGENDARY = "legendary"
+    MYTHIC = "mythic"
+    ETERNAL = "eternal"
+
+
+# Таблица компенсации дубликатов в GEMS
+RARITY_DUPLICATE_REWARD_GEMS = {
+    Rarity.RARE: 1,
+    Rarity.LEGENDARY: 3,
+    Rarity.MYTHIC: 10,
+    Rarity.ETERNAL: 50,
+}
+
+
 class ContentItem(Base):
     __tablename__ = "content_items"
 
@@ -52,6 +68,14 @@ class ContentItem(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ContentStatus] = mapped_column(SAEnum(ContentStatus, values_callable=lambda x: [e.value for e in x]), default=ContentStatus.DRAFT)
     media_type: Mapped[MediaType] = mapped_column(SAEnum(MediaType, values_callable=lambda x: [e.value for e in x]))
+    rarity: Mapped[Rarity] = mapped_column(
+        SAEnum(Rarity, values_callable=lambda x: [e.value for e in x]),
+        default=Rarity.RARE,
+        nullable=False,
+    )
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("models.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

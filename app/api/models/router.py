@@ -14,6 +14,8 @@ class ModelThemeResponse(BaseModel):
     model_id: int
     name: str
     theme: dict
+    media_spin_price_gems: int = 0
+    media_spin_price_stars: int = 0
 
 
 @router.get("/{model_id}/theme", response_model=ModelThemeResponse)
@@ -21,7 +23,7 @@ async def get_model_theme(
     model_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Получить тему оформления Mini-App конкретной модели для кастомизации UI."""
+    """Получить тему оформления и цены медиа-спина Mini-App конкретной модели."""
     model = await session.get(Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -37,4 +39,6 @@ async def get_model_theme(
         model_id=model.id,
         name=model.name,
         theme=theme_data,
+        media_spin_price_gems=model.media_spin_price_gems,
+        media_spin_price_stars=model.media_spin_price_stars,
     )

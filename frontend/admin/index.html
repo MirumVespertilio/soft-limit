@@ -68,6 +68,18 @@
                     <label for="model-theme">Тема (JSON)</label>
                     <textarea id="model-theme" class="input textarea" rows="4" placeholder='{"primary_color": "#ff007f", "accent": "#00ffcc"}'></textarea>
                 </div>
+                <div class="form-group">
+                    <label for="model-price-gems">Медиа-спин (GEMS)</label>
+                    <input type="number" id="model-price-gems" class="input" min="0" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label for="model-price-stars">Медиа-спин (Stars)</label>
+                    <input type="number" id="model-price-stars" class="input" min="0" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label for="model-rarity-weights">Веса редкости (JSON)</label>
+                    <textarea id="model-rarity-weights" class="input textarea" rows="3" placeholder='{"rare": 50, "legendary": 30, "mythic": 15, "eternal": 5}'></textarea>
+                </div>
                 <div class="modal-actions">
                     <button type="button" id="close-model-modal-btn" class="btn btn-secondary">Отмена</button>
                     <button type="submit" class="btn btn-primary">Сохранить</button>

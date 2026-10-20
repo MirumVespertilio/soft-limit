@@ -351,3 +351,114 @@ main {
     transform: scale(1.1);
     box-shadow: 0 0 12px var(--primary-glow);
 }
+
+/* Header with daily free button */
+.header {
+    flex-direction: column;
+    gap: 10px;
+}
+
+.header h1 {
+    text-align: center;
+    width: 100%;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 13px;
+}
+
+/* Section hint */
+.section-hint {
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: center;
+    max-width: 300px;
+}
+
+/* Rarity badge */
+.rarity-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.rarity-badge.small {
+    font-size: 10px;
+    padding: 2px 10px;
+}
+
+.inventory-card {
+    position: relative;
+}
+
+.inventory-card .rarity-badge.small {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+}
+
+.result-reward {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent-color);
+    text-align: center;
+}
+
+/* Confirm Purchase modal */
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+}
+
+.modal-content {
+    background: var(--card-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    width: 100%;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6);
+    animation: popIn 0.25s ease;
+}
+
+.modal-content h3 {
+    font-size: 18px;
+    text-align: center;
+}
+
+.modal-content p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    text-align: center;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.modal-actions .btn {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 14px;
+}

@@ -39,6 +39,8 @@ class MeResponse(BaseModel):
     telegram_id: int
     role: str
     model_id: int | None = None
+    gems: int = 0
+    spins: int = 0
 
 
 @router.post("/telegram", response_model=AuthResponse)
@@ -99,11 +101,21 @@ async def telegram_auth(request: AuthRequest, session: AsyncSession = Depends(ge
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(current_user: CurrentUser = Depends(get_current_user)):
-    """Вернуть профиль текущего пользователя с его ролью и контекстом модели."""
+async def me(
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Вернуть профиль текущего пользователя с ролью, контекстом модели и балансами."""
+    result = await session.execute(
+        select(UserWallet).where(UserWallet.user_id == current_user.id)
+    )
+    wallet = result.scalar_one_or_none()
+
     return MeResponse(
         id=current_user.id,
         telegram_id=current_user.telegram_id,
         role=current_user.role,
         model_id=current_user.model_id,
+        gems=wallet.gems_balance if wallet else 0,
+        spins=wallet.spins_balance if wallet else 0,
     )

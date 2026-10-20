@@ -103,6 +103,10 @@ function initTabs() {
 
             if (tabId === 'models') loadModels();
             else if (tabId === 'dashboard') loadDashboard();
+            else if (tabId === 'content') loadContent();
+            else if (tabId === 'wheel') loadWheel();
+            else if (tabId === 'welcome') loadWelcomePool();
+            else if (tabId === 'users') loadUsers();
             else if (tabId === 'packages') loadPackages();
         });
     });
@@ -159,6 +163,9 @@ function openModelModal(model = null) {
     const nameInput = document.getElementById('model-name');
     const tokenInput = document.getElementById('model-token');
     const themeInput = document.getElementById('model-theme');
+    const priceGemsInput = document.getElementById('model-price-gems');
+    const priceStarsInput = document.getElementById('model-price-stars');
+    const rarityWeightsInput = document.getElementById('model-rarity-weights');
 
     if (model) {
         modalTitle.textContent = 'Редактировать модель';
@@ -166,12 +173,18 @@ function openModelModal(model = null) {
         nameInput.value = model.name;
         tokenInput.value = model.bot_token || '';
         themeInput.value = model.theme_json || '';
+        priceGemsInput.value = model.media_spin_price_gems ?? 0;
+        priceStarsInput.value = model.media_spin_price_stars ?? 0;
+        rarityWeightsInput.value = model.rarity_weights_json || '';
     } else {
         modalTitle.textContent = 'Новая модель';
         idInput.value = '';
         nameInput.value = '';
         tokenInput.value = '';
         themeInput.value = '';
+        priceGemsInput.value = 0;
+        priceStarsInput.value = 0;
+        rarityWeightsInput.value = '';
     }
 
     modal.classList.remove('hidden');
@@ -190,11 +203,17 @@ document.getElementById('model-form')?.addEventListener('submit', async (e) => {
     const name = document.getElementById('model-name').value;
     const bot_token = document.getElementById('model-token').value;
     const theme_json = document.getElementById('model-theme').value;
+    const price_gems = parseInt(document.getElementById('model-price-gems').value, 10) || 0;
+    const price_stars = parseInt(document.getElementById('model-price-stars').value, 10) || 0;
+    const rarity_weights_json = document.getElementById('model-rarity-weights').value;
 
     const payload = {
         name,
         bot_token: bot_token || null,
         theme_json: theme_json || null,
+        media_spin_price_gems: price_gems,
+        media_spin_price_stars: price_stars,
+        rarity_weights_json: rarity_weights_json || null,
     };
 
     try {
@@ -234,25 +253,226 @@ async function loadDashboard() {
     }
 }
 
+// ==============================================================================
+// Контент
+// ==============================================================================
+
+async function loadContent() {
+    const el = document.getElementById('admin-content');
+    el.innerHTML = '<p class="loading-text">Загрузка контента...</p>';
+    try {
+        const [contentRes, modelsRes] = await Promise.all([
+            api('/admin/content'),
+            api('/admin/models'),
+        ]);
+        const content = await contentRes.json();
+        const models = (await modelsRes.json()).models || [];
+        const modelOptions = models.map(m => `<option value="${m.id}">${escapeHtml(m.name)} (#${m.id})</option>`).join('');
+        const items = content.items || [];
+
+        el.innerHTML = `
+            <div class="glass-panel" style="padding: 16px;">
+                <h3>Контент</h3>
+                <form id="content-form" style="display:flex; flex-direction:column; gap:8px; margin:12px 0;">
+                    <input type="text" id="content-title" class="input" placeholder="Название" required>
+                    <textarea id="content-description" class="input textarea" rows="2" placeholder="Описание"></textarea>
+                    <select id="content-model" class="input"><option value="">Без модели</option>${modelOptions}</select>
+                    <select id="content-rarity" class="input">
+                        <option value="rare">Rare</option>
+                        <option value="legendary">Legendary</option>
+                        <option value="mythic">Mythic</option>
+                        <option value="eternal">Eternal</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary btn-sm">Добавить контент</button>
+                </form>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${items.map(c => `
+                        <div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)">
+                            <span>${escapeHtml(c.title)} <span class="no-bot-tag">${c.rarity}</span> ${c.model_id ? `(модель #${c.model_id})` : ''}</span>
+                            <span>${c.status}</span>
+                        </div>
+                    `).join('') || '<p class="loading-text">Нет контента</p>'}
+                </div>
+            </div>
+        `;
+
+        document.getElementById('content-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = document.getElementById('content-title').value;
+            const description = document.getElementById('content-description').value;
+            const model_id = document.getElementById('content-model').value;
+            const rarity = document.getElementById('content-rarity').value;
+            await api('/admin/content', {
+                method: 'POST',
+                body: JSON.stringify({
+                    title,
+                    description: description || null,
+                    media_type: 'photo',
+                    model_id: model_id ? parseInt(model_id, 10) : null,
+                    rarity,
+                }),
+            });
+            loadContent();
+        });
+    } catch (e) {
+        el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
+    }
+}
+
+// ==============================================================================
+// Колесо
+// ==============================================================================
+
+async function loadWheel() {
+    const el = document.getElementById('admin-wheel');
+    el.innerHTML = '<p class="loading-text">Загрузка колёс...</p>';
+    try {
+        const [wheelsRes, modelsRes] = await Promise.all([
+            api('/admin/wheels'),
+            api('/admin/models'),
+        ]);
+        const wheels = (await wheelsRes.json()).wheels || [];
+        const models = (await modelsRes.json()).models || [];
+        const modelOptions = models.map(m => `<option value="${m.id}">${escapeHtml(m.name)} (#${m.id})</option>`).join('');
+
+        el.innerHTML = `
+            <div class="glass-panel" style="padding: 16px;">
+                <h3>Колёса</h3>
+                <form id="wheel-form" style="display:flex; gap:8px; margin:12px 0; flex-wrap:wrap;">
+                    <input type="text" id="wheel-name" class="input" placeholder="Название колеса" required>
+                    <select id="wheel-model" class="input"><option value="">Без модели</option>${modelOptions}</select>
+                    <button type="submit" class="btn btn-primary btn-sm">Создать</button>
+                </form>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${wheels.map(w => `<div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)"><span>${escapeHtml(w.name)} (#${w.id})${w.model_id ? ` модель #${w.model_id}` : ''}</span><span>${w.status}</span></div>`).join('') || '<p class="loading-text">Нет колёс</p>'}
+                </div>
+            </div>
+        `;
+
+        document.getElementById('wheel-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('wheel-name').value;
+            const model_id = document.getElementById('wheel-model').value;
+            await api('/admin/wheels', {
+                method: 'POST',
+                body: JSON.stringify({ name, model_id: model_id ? parseInt(model_id, 10) : null }),
+            });
+            loadWheel();
+        });
+    } catch (e) {
+        el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
+    }
+}
+
+// ==============================================================================
+// Приветственный пул / Пользователи
+// ==============================================================================
+
+async function loadWelcomePool() {
+    const el = document.getElementById('admin-welcome');
+    el.innerHTML = '<p class="loading-text">Загрузка...</p>';
+    try {
+        const res = await api('/admin/welcome-pool');
+        const data = await res.json();
+        el.innerHTML = `
+            <div class="glass-panel" style="padding: 16px;">
+                <h3>Приветственный пул</h3>
+                <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+                    ${(data.items || []).map(i => `<div style="padding:8px; border-bottom:1px solid var(--border-glass)">${escapeHtml(i.title)} (${i.status})</div>`).join('') || '<p class="loading-text">Пусто</p>'}
+                </div>
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
+    }
+}
+
+async function loadUsers() {
+    const el = document.getElementById('admin-users');
+    el.innerHTML = '<p class="loading-text">Загрузка пользователей...</p>';
+    try {
+        const res = await api('/admin/users');
+        const data = await res.json();
+        el.innerHTML = `
+            <div class="glass-panel" style="padding: 16px;">
+                <h3>Пользователи</h3>
+                <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+                    ${(data.users || []).map(u => `<div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)"><span>${escapeHtml(u.username || u.telegram_id)}</span><span>💎${u.gems} 🎰${u.spins}</span></div>`).join('')}
+                </div>
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
+    }
+}
+
+// ==============================================================================
+// Пакеты
+// ==============================================================================
+
 async function loadPackages() {
     const pkgEl = document.getElementById('admin-packages');
     pkgEl.innerHTML = '<p class="loading-text">Загрузка пакетов...</p>';
     try {
-        const res = await api('/admin/spin-packages');
-        const data = await res.json();
+        const [spinRes, gemRes] = await Promise.all([
+            api('/admin/spin-packages'),
+            api('/admin/gem-packages'),
+        ]);
+        const spin = await spinRes.json();
+        const gem = await gemRes.json();
+
         pkgEl.innerHTML = `
-            <div class="glass-panel" style="padding: 16px;">
+            <div class="glass-panel" style="padding: 16px; margin-bottom:12px;">
                 <h3>Пакеты спинов (за GEMS)</h3>
-                <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
-                    ${data.packages.map(p => `
-                        <div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)">
-                            <span>${escapeHtml(p.name)} (${p.spins_count} спинов)</span>
-                            <b>${p.price_gems} GEMS</b>
-                        </div>
-                    `).join('')}
+                <form id="spin-pkg-form" style="display:flex; gap:8px; margin:10px 0; flex-wrap:wrap;">
+                    <input type="text" id="spin-pkg-name" class="input" placeholder="Название" required>
+                    <input type="number" id="spin-pkg-count" class="input" placeholder="Спины" required>
+                    <input type="number" id="spin-pkg-price" class="input" placeholder="Цена GEMS" required>
+                    <button type="submit" class="btn btn-primary btn-sm">Добавить</button>
+                </form>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${(spin.packages || []).map(p => `<div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)"><span>${escapeHtml(p.name)} (${p.spins_count} спинов)</span><b>${p.price_gems} GEMS</b></div>`).join('') || '<p class="loading-text">Нет пакетов</p>'}
+                </div>
+            </div>
+            <div class="glass-panel" style="padding: 16px;">
+                <h3>Пакеты GEMS (за Stars)</h3>
+                <form id="gem-pkg-form" style="display:flex; gap:8px; margin:10px 0; flex-wrap:wrap;">
+                    <input type="text" id="gem-pkg-name" class="input" placeholder="Название" required>
+                    <input type="number" id="gem-pkg-amount" class="input" placeholder="GEMS" required>
+                    <input type="number" id="gem-pkg-price" class="input" placeholder="Цена Stars" required>
+                    <button type="submit" class="btn btn-primary btn-sm">Добавить</button>
+                </form>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${(gem.packages || []).map(p => `<div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)"><span>${escapeHtml(p.name)} (+${p.gems_amount} GEMS)</span><b>${p.price_stars} ⭐</b></div>`).join('') || '<p class="loading-text">Нет пакетов</p>'}
                 </div>
             </div>
         `;
+
+        document.getElementById('spin-pkg-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await api('/admin/spin-packages', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('spin-pkg-name').value,
+                    spins_count: parseInt(document.getElementById('spin-pkg-count').value, 10),
+                    price_gems: parseInt(document.getElementById('spin-pkg-price').value, 10),
+                }),
+            });
+            loadPackages();
+        });
+
+        document.getElementById('gem-pkg-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await api('/admin/gem-packages', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('gem-pkg-name').value,
+                    gems_amount: parseInt(document.getElementById('gem-pkg-amount').value, 10),
+                    price_stars: parseInt(document.getElementById('gem-pkg-price').value, 10),
+                }),
+            });
+            loadPackages();
+        });
     } catch (e) {
         pkgEl.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
     }

@@ -39,6 +39,7 @@ async def get_inventory(
             "title": item.title,
             "description": item.description,
             "media_type": item.media_type.value,
+            "rarity": item.rarity.value,
             "source": inv.source.value,
             "preview_media_id": preview.media_asset_id if preview else None,
             "acquired_at": inv.created_at.isoformat(),

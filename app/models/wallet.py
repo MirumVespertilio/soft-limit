@@ -24,6 +24,8 @@ class TransactionReason(PyEnum):
     PURCHASE = "PURCHASE"
     ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
     SPIN = "SPIN"
+    DAILY_FREE_SPIN = "DAILY_FREE_SPIN"
+    MEDIA_SPIN_PURCHASE = "MEDIA_SPIN_PURCHASE"
     TELEGRAM_STARS_PURCHASE = "TELEGRAM_STARS_PURCHASE"  # пополнение GEMS за Telegram Stars
     DUPLICATE_REFUND = "DUPLICATE_REFUND"                # возврат GEMS за дубликат медиа
 

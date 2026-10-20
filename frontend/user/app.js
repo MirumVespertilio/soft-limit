@@ -4,6 +4,8 @@ let currentUser = null;
 let wheelData = null;
 let isSpinning = false;
 let currentModelId = null;
+let wheelRotation = 0;
+let dailyFreeReady = false;
 
 const tg = window.Telegram?.WebApp;
 if (tg) {
@@ -11,7 +13,13 @@ if (tg) {
     tg.expand();
 }
 
-// Извлечение model_id из URL параметров
+const RARITY_LABELS = {
+    rare: { label: 'Rare', color: '#4da3ff' },
+    legendary: { label: 'Legendary', color: '#b06bff' },
+    mythic: { label: 'Mythic', color: '#ff5c8a' },
+    eternal: { label: 'Eternal', color: '#ffb347' },
+};
+
 function getModelIdFromUrl() {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('model_id') || tg?.initDataUnsafe?.start_param;
@@ -89,6 +97,13 @@ async function applyModelTheme(modelId) {
         }
         if (theme.bg_gradient_bottom) {
             root.style.setProperty('--bg-gradient-bottom', theme.bg_gradient_bottom);
+        }
+
+        if (data.media_spin_price_gems != null) {
+            document.getElementById('media-price-gems').textContent = data.media_spin_price_gems;
+        }
+        if (data.media_spin_price_stars != null) {
+            document.getElementById('media-price-stars').textContent = data.media_spin_price_stars;
         }
     } catch (e) {
         console.warn('Could not load model theme, using defaults:', e);
@@ -182,11 +197,25 @@ function initNavigation() {
         document.getElementById('wheel-section').classList.remove('hidden');
     });
 
-    document.getElementById('spin-btn')?.addEventListener('click', doSpin);
+    document.getElementById('spin-btn')?.addEventListener('click', doWheelSpin);
+    document.getElementById('media-spin-gems-btn')?.addEventListener('click', () => doMediaSpin('gems'));
+    document.getElementById('media-spin-stars-btn')?.addEventListener('click', () => doMediaSpin('stars'));
+    document.getElementById('daily-free-btn')?.addEventListener('click', claimDailyFreeSpin);
+
+    document.getElementById('confirm-cancel')?.addEventListener('click', closeConfirmModal);
+    document.getElementById('confirm-ok')?.addEventListener('click', () => {
+        if (typeof window._confirmCallback === 'function') {
+            const cb = window._confirmCallback;
+            window._confirmCallback = null;
+            closeConfirmModal();
+            cb();
+        }
+    });
 }
 
 function updateUI() {
     loadBalances();
+    loadDailyFreeStatus();
     loadWheel();
 }
 
@@ -201,18 +230,52 @@ async function loadBalances() {
     }
 }
 
+async function loadDailyFreeStatus() {
+    try {
+        const response = await api('/spins/daily-free/status');
+        if (!response.ok) return;
+        const data = await response.json();
+        dailyFreeReady = !!data.ready;
+        const btn = document.getElementById('daily-free-btn');
+        if (btn) {
+            btn.disabled = !dailyFreeReady;
+            btn.textContent = dailyFreeReady ? '🎁 Бесплатный спин' : '🎁 Спин доступен позже';
+        }
+    } catch (e) {
+        console.error('Failed to load daily free status:', e);
+    }
+}
+
+async function claimDailyFreeSpin() {
+    if (!dailyFreeReady) return;
+    try {
+        const response = await api('/spins/daily-free', { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json();
+            alert(err.detail || 'Не удалось получить бесплатный спин');
+            return;
+        }
+        const data = await response.json();
+        alert(data.granted ? 'Бесплатный спин начислен!' : 'Спин пока недоступен.');
+        await loadBalances();
+        await loadDailyFreeStatus();
+    } catch (e) {
+        alert('Ошибка: ' + e.message);
+    }
+}
+
 async function loadWheel() {
     try {
         const response = await api('/wheel');
         wheelData = await response.json();
-        drawWheel();
+        drawWheel(wheelRotation);
         updateSpinButton();
     } catch (e) {
         console.error('Failed to load wheel:', e);
     }
 }
 
-function drawWheel() {
+function drawWheel(rotation = 0) {
     const canvas = document.getElementById('wheel-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -245,7 +308,7 @@ function drawWheel() {
     ];
 
     segments.forEach((seg, i) => {
-        const startAngle = i * anglePerSegment;
+        const startAngle = i * anglePerSegment + rotation;
         const endAngle = startAngle + anglePerSegment;
 
         ctx.beginPath();
@@ -263,9 +326,29 @@ function drawWheel() {
         ctx.textAlign = 'right';
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 12px sans-serif';
-        ctx.fillText(seg.label || `Prize ${i+1}`, radius - 20, 5);
+        ctx.fillText(seg.label || `Prize ${i + 1}`, radius - 20, 5);
         ctx.restore();
     });
+}
+
+function animateWheel(duration, done) {
+    const start = wheelRotation;
+    const target = start + Math.PI * 2 * (3 + Math.random() * 2);
+    const startTime = performance.now();
+
+    function frame(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        wheelRotation = start + (target - start) * eased;
+        drawWheel(wheelRotation);
+        if (progress < 1) {
+            requestAnimationFrame(frame);
+        } else if (done) {
+            done();
+        }
+    }
+    requestAnimationFrame(frame);
 }
 
 function updateSpinButton() {
@@ -274,14 +357,14 @@ function updateSpinButton() {
     btn.disabled = isSpinning;
 }
 
-async function doSpin() {
+async function doWheelSpin() {
     if (isSpinning) return;
     isSpinning = true;
     updateSpinButton();
 
     try {
-        const idemKey = `spin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const res = await api('/spins', {
+        const idemKey = `wheel_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const res = await api('/spins/wheel', {
             method: 'POST',
             body: JSON.stringify({ idempotency_key: idemKey }),
         });
@@ -295,7 +378,46 @@ async function doSpin() {
         }
 
         const data = await res.json();
-        // Анимация и показ результата
+        animateWheel(1800, () => {
+            showResult(data);
+            loadBalances();
+            isSpinning = false;
+            updateSpinButton();
+        });
+    } catch (e) {
+        alert('Ошибка при крутке: ' + e.message);
+        isSpinning = false;
+        updateSpinButton();
+    }
+}
+
+async function doMediaSpin(currency) {
+    if (isSpinning) return;
+
+    if (currency === 'stars') {
+        await mediaSpinWithStars();
+        return;
+    }
+
+    isSpinning = true;
+    updateSpinButton();
+
+    try {
+        const idemKey = `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const res = await api('/spins/media', {
+            method: 'POST',
+            body: JSON.stringify({ idempotency_key: idemKey }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.detail || 'Не удалось выполнить спин');
+            isSpinning = false;
+            updateSpinButton();
+            return;
+        }
+
+        const data = await res.json();
         showResult(data);
         loadBalances();
     } catch (e) {
@@ -306,16 +428,88 @@ async function doSpin() {
     }
 }
 
+async function mediaSpinWithStars() {
+    const price = parseInt(document.getElementById('media-price-stars').textContent, 10) || 0;
+    const idemKey = `media_stars_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    try {
+        const res = await api('/spins/media/invoice-link', {
+            method: 'POST',
+            body: JSON.stringify({ model_id: currentModelId }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.detail || 'Ошибка создания счёта');
+            return;
+        }
+
+        const data = await res.json();
+
+        if (tg?.openInvoice) {
+            tg.openInvoice(data.invoice_link, async (status) => {
+                if (status === 'paid') {
+                    const compRes = await api('/spins/media/complete', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            model_id: currentModelId,
+                            idempotency_key: idemKey,
+                        }),
+                    });
+                    if (compRes.ok) {
+                        const compData = await compRes.json();
+                        showResult(compData);
+                        loadBalances();
+                    } else {
+                        const err = await compRes.json();
+                        alert(err.detail || 'Не удалось завершить покупку');
+                    }
+                } else {
+                    console.log('Media spin payment status:', status);
+                }
+            });
+        } else {
+            alert(`Тестовый режим: ссылка на инвойс ${data.invoice_link}`);
+        }
+    } catch (e) {
+        alert('Ошибка: ' + e.message);
+    }
+}
+
 function showResult(prize) {
     document.getElementById('wheel-section').classList.add('hidden');
+    document.getElementById('media-section').classList.add('hidden');
     const resultSec = document.getElementById('result-section');
     resultSec.classList.remove('hidden');
 
-    document.getElementById('result-title').textContent = prize.title || 'Поздравляем!';
-    document.getElementById('result-description').textContent = prize.description || 'Вы выиграли эксклюзивную карточку!';
+    const rarityEl = document.getElementById('result-rarity');
+    if (prize.rarity && RARITY_LABELS[prize.rarity]) {
+        const r = RARITY_LABELS[prize.rarity];
+        rarityEl.textContent = r.label;
+        rarityEl.style.background = r.color;
+        rarityEl.classList.remove('hidden');
+    } else {
+        rarityEl.classList.add('hidden');
+    }
+
+    const title = prize.title || (prize.is_duplicate ? 'Дубликат!' : 'Поздравляем!');
+    document.getElementById('result-title').textContent = title;
+    document.getElementById('result-description').textContent = prize.description || '';
+
+    const rewardParts = [];
+    if (prize.is_duplicate) {
+        rewardParts.push(`+${prize.reward_gems} 💎 (дубликат)`);
+    } else if (prize.reward_gems) {
+        rewardParts.push(`+${prize.reward_gems} 💎`);
+    }
+    if (prize.reward_spins) {
+        rewardParts.push(`+${prize.reward_spins} 🎰`);
+    }
+    document.getElementById('result-reward').textContent = rewardParts.join('  ');
+
     const imgEl = document.getElementById('result-image');
     if (prize.preview_media_id) {
-        imgEl.src = `${API_BASE}/api/v1/media/${prize.preview_media_id}/file`;
+        imgEl.src = `${API_BASE}/api/v1/media/${prize.preview_media_id}/preview`;
         imgEl.classList.remove('hidden');
     } else {
         imgEl.classList.add('hidden');
@@ -333,12 +527,16 @@ async function loadInventory() {
             grid.innerHTML = '<p style="text-align:center; grid-column:span 2; color:var(--text-secondary);">Ваша коллекция пока пуста. Крутите колесо!</p>';
             return;
         }
-        grid.innerHTML = items.map(item => `
+        grid.innerHTML = items.map(item => {
+            const rarity = item.rarity && RARITY_LABELS[item.rarity] ? RARITY_LABELS[item.rarity] : null;
+            return `
             <div class="inventory-card">
-                ${item.preview_media_id ? `<img src="${API_BASE}/api/v1/media/${item.preview_media_id}/file" alt="Item">` : '<div style="height:100px; display:flex; align-items:center;">🖼️</div>'}
+                ${item.preview_media_id ? `<img src="${API_BASE}/api/v1/media/${item.preview_media_id}/preview" alt="Item">` : '<div style="height:100px; display:flex; align-items:center;">🖼️</div>'}
+                ${rarity ? `<span class="rarity-badge small" style="background:${rarity.color}">${rarity.label}</span>` : ''}
                 <h3>${escapeHtml(item.title)}</h3>
             </div>
-        `).join('');
+        `;
+        }).join('');
     } catch (e) {
         grid.innerHTML = `<p style="grid-column:span 2; color:var(--primary-color);">Ошибка: ${e.message}</p>`;
     }
@@ -368,9 +566,13 @@ async function loadShop() {
         `).join('');
 
         document.querySelectorAll('.buy-spin-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
+            btn.addEventListener('click', () => {
                 const pkgId = parseInt(btn.getAttribute('data-id'), 10);
-                await buySpinPackage(pkgId);
+                const price = parseInt(btn.getAttribute('data-price'), 10);
+                openConfirmModal(
+                    `Купить пакет спинов за ${price} 💎?`,
+                    () => buySpinPackage(pkgId)
+                );
             });
         });
     } catch (e) {
@@ -402,14 +604,29 @@ async function loadGemPackages() {
         `).join('');
 
         document.querySelectorAll('.buy-gem-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
+            btn.addEventListener('click', () => {
                 const pkgId = parseInt(btn.getAttribute('data-id'), 10);
-                await buyGemPackage(pkgId);
+                const price = parseInt(btn.getAttribute('data-price'), 10);
+                openConfirmModal(
+                    `Купить ${price} ⭐ GEMS?`,
+                    () => buyGemPackage(pkgId)
+                );
             });
         });
     } catch (e) {
         list.innerHTML = `<p style="color:var(--primary-color);">Ошибка: ${e.message}</p>`;
     }
+}
+
+function openConfirmModal(text, callback) {
+    window._confirmCallback = callback;
+    document.getElementById('confirm-text').textContent = text;
+    document.getElementById('confirm-modal').classList.remove('hidden');
+}
+
+function closeConfirmModal() {
+    window._confirmCallback = null;
+    document.getElementById('confirm-modal').classList.add('hidden');
 }
 
 async function buySpinPackage(pkgId) {
@@ -436,7 +653,6 @@ async function buySpinPackage(pkgId) {
 
 async function buyGemPackage(pkgId) {
     try {
-        // Создаем ссылку на инвойс через Telegram Stars Payments API
         const res = await api('/gem-purchases/invoice-link', {
             method: 'POST',
             body: JSON.stringify({ package_id: pkgId }),
@@ -450,11 +666,9 @@ async function buyGemPackage(pkgId) {
 
         const data = await res.json();
 
-        // Если запущено в Telegram — открываем встроенное окно оплаты Telegram Stars
         if (tg?.openInvoice) {
             tg.openInvoice(data.invoice_link, async (status) => {
                 if (status === 'paid') {
-                    // Завершаем покупку и зачисляем GEMS
                     const compRes = await api('/gem-purchases/complete', {
                         method: 'POST',
                         body: JSON.stringify({

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
 from app.db import get_session
-from app.models.content import ContentItem, ContentStatus, MediaType
+from app.models.content import ContentItem, ContentStatus, MediaType, Rarity
 from app.models.content import ContentItemMedia, MediaAsset, FileRole
 from app.models.welcome import WelcomeRewardItem
 
@@ -16,6 +16,8 @@ class ContentCreateRequest(BaseModel):
     title: str
     description: str | None = None
     media_type: MediaType
+    model_id: int | None = None
+    rarity: Rarity = Rarity.RARE
 
 
 class ContentUpdateRequest(BaseModel):
@@ -23,6 +25,8 @@ class ContentUpdateRequest(BaseModel):
     description: str | None = None
     status: ContentStatus | None = None
     media_type: MediaType | None = None
+    model_id: int | None = None
+    rarity: Rarity | None = None
 
 
 @router.get("/content")
@@ -40,6 +44,8 @@ async def list_content(
                 "description": c.description,
                 "status": c.status.value,
                 "media_type": c.media_type.value,
+                "model_id": c.model_id,
+                "rarity": c.rarity.value,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }
             for c in items
@@ -58,6 +64,8 @@ async def create_content(
         description=request.description,
         media_type=request.media_type,
         status=ContentStatus.DRAFT,
+        model_id=request.model_id,
+        rarity=request.rarity,
     )
     session.add(item)
     await session.commit()

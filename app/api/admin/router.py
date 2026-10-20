@@ -12,7 +12,7 @@ from app.models.wallet import UserWallet, TransactionResource, TransactionReason
 from app.models.spin import Spin
 from app.models.purchases import SpinPurchase
 from app.models.content import ContentItem, ContentStatus
-from app.models.wheel import Wheel, WheelSegment
+from app.models.wheel import Wheel, WheelSegment, RewardType
 from app.models.welcome import WelcomeRewardItem
 from app.models.purchases import SpinPackage
 from app.models.inventory import UserInventory
@@ -353,7 +353,7 @@ async def list_wheels(
     wheels = result.scalars().all()
     return {
         "wheels": [
-            {"id": w.id, "name": w.name, "status": w.status.value}
+            {"id": w.id, "name": w.name, "status": w.status.value, "model_id": w.model_id}
             for w in wheels
         ]
     }
@@ -361,6 +361,7 @@ async def list_wheels(
 
 class WheelCreateRequest(BaseModel):
     name: str
+    model_id: int | None = None
 
 
 @router.post("/wheels")
@@ -369,10 +370,17 @@ async def create_wheel(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    await session.execute(
-        update(Wheel).where(Wheel.status == "active").values(status="inactive")
-    )
-    wheel = Wheel(name=request.name, status="active")
+    if request.model_id is not None:
+        await session.execute(
+            update(Wheel)
+            .where(Wheel.model_id == request.model_id, Wheel.status == "active")
+            .values(status="inactive")
+        )
+    else:
+        await session.execute(
+            update(Wheel).where(Wheel.status == "active").values(status="inactive")
+        )
+    wheel = Wheel(name=request.name, model_id=request.model_id, status="active")
     session.add(wheel)
     await session.commit()
     return {"id": wheel.id}
@@ -383,10 +391,13 @@ class SegmentUpdateRequest(BaseModel):
 
 
 class SegmentAddRequest(BaseModel):
-    content_item_id: int
+    content_item_id: int | None = None
     label: str
     weight: int
     position: int | None = None
+    reward_type: RewardType = RewardType.NONE
+    reward_gems: int = 0
+    reward_spins: int = 0
 
 
 @router.post("/wheels/{wheel_id}/segments")
@@ -403,14 +414,15 @@ async def add_wheel_segment(
     if request.weight <= 0:
         raise HTTPException(status_code=400, detail="Weight must be positive")
 
-    content_item = await session.get(ContentItem, request.content_item_id)
-    if not content_item:
-        raise HTTPException(status_code=400, detail="Content item not found")
-    if content_item.status != ContentStatus.PUBLISHED:
-        raise HTTPException(
-            status_code=400,
-            detail="Only published content items can be added to the wheel",
-        )
+    if request.content_item_id is not None:
+        content_item = await session.get(ContentItem, request.content_item_id)
+        if not content_item:
+            raise HTTPException(status_code=400, detail="Content item not found")
+        if content_item.status != ContentStatus.PUBLISHED:
+            raise HTTPException(
+                status_code=400,
+                detail="Only published content items can be added to the wheel",
+            )
 
     existing_result = await session.execute(
         select(WheelSegment.position).where(WheelSegment.wheel_id == wheel_id)
@@ -435,6 +447,9 @@ async def add_wheel_segment(
         weight=request.weight,
         is_active=True,
         position=position,
+        reward_type=request.reward_type,
+        reward_gems=request.reward_gems,
+        reward_spins=request.reward_spins,
     )
     session.add(segment)
     await session.commit()
@@ -463,9 +478,11 @@ async def update_wheel_segments(
     for seg_data in request.segments:
         if seg_data.get("weight", 0) <= 0:
             raise HTTPException(status_code=400, detail="Weight must be positive")
-        content_item = await session.get(ContentItem, seg_data["content_item_id"])
-        if not content_item:
-            raise HTTPException(status_code=400, detail="Content item not found")
+        content_item_id = seg_data.get("content_item_id")
+        if content_item_id is not None:
+            content_item = await session.get(ContentItem, content_item_id)
+            if not content_item:
+                raise HTTPException(status_code=400, detail="Content item not found")
 
     existing_result = await session.execute(
         select(WheelSegment).where(WheelSegment.wheel_id == wheel_id)
@@ -495,8 +512,12 @@ async def update_wheel_segments(
         # New/editable segments must point to published cards. Used historical
         # segments may reference content later unpublished, but remain immutable.
         if seg_id not in used_segment_ids:
-            item = await session.get(ContentItem, seg_data["content_item_id"])
-            if not item or item.status != ContentStatus.PUBLISHED:
+            item = None
+            if seg_data.get("content_item_id") is not None:
+                item = await session.get(ContentItem, seg_data["content_item_id"])
+            if seg_data.get("content_item_id") is not None and (
+                not item or item.status != ContentStatus.PUBLISHED
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail="Only published content items can be added to the wheel",
@@ -512,6 +533,9 @@ async def update_wheel_segments(
                 "weight": seg_data.get("weight", old.weight),
                 "position": seg_data.get("position", old.position),
                 "is_active": seg_data.get("is_active", old.is_active),
+                "reward_type": seg_data.get("reward_type", old.reward_type.value),
+                "reward_gems": seg_data.get("reward_gems", old.reward_gems),
+                "reward_spins": seg_data.get("reward_spins", old.reward_spins),
             }
             old_values = {
                 "content_item_id": old.content_item_id,
@@ -519,6 +543,9 @@ async def update_wheel_segments(
                 "weight": old.weight,
                 "position": old.position,
                 "is_active": old.is_active,
+                "reward_type": old.reward_type.value,
+                "reward_gems": old.reward_gems,
+                "reward_spins": old.reward_spins,
             }
             if requested_values != old_values:
                 raise HTTPException(
@@ -574,11 +601,14 @@ async def update_wheel_segments(
     for seg_data in request.segments:
         seg_id = seg_data.get("segment_id")
         values = {
-            "content_item_id": seg_data["content_item_id"],
+            "content_item_id": seg_data.get("content_item_id"),
             "label": seg_data["label"],
             "weight": seg_data["weight"],
             "is_active": seg_data.get("is_active", True),
             "position": seg_data["position"],
+            "reward_type": RewardType(seg_data.get("reward_type", RewardType.NONE.value)),
+            "reward_gems": seg_data.get("reward_gems", 0),
+            "reward_spins": seg_data.get("reward_spins", 0),
         }
         if seg_id is None:
             session.add(WheelSegment(wheel_id=wheel_id, **values))
@@ -650,12 +680,18 @@ class ModelCreateRequest(BaseModel):
     name: str
     bot_token: str | None = None
     theme_json: str | None = None
+    media_spin_price_gems: int = 0
+    media_spin_price_stars: int = 0
+    rarity_weights_json: str | None = None
 
 
 class ModelUpdateRequest(BaseModel):
     name: str | None = None
     bot_token: str | None = None
     theme_json: str | None = None
+    media_spin_price_gems: int | None = None
+    media_spin_price_stars: int | None = None
+    rarity_weights_json: str | None = None
 
 
 class ModelResponse(BaseModel):
@@ -664,6 +700,9 @@ class ModelResponse(BaseModel):
     owner_user_id: int
     bot_token: str | None = None
     theme_json: str | None = None
+    media_spin_price_gems: int = 0
+    media_spin_price_stars: int = 0
+    rarity_weights_json: str | None = None
     created_at: str | None = None
 
 
@@ -687,6 +726,9 @@ async def list_models(
                 "owner_user_id": m.owner_user_id,
                 "bot_token": m.bot_token,
                 "theme_json": m.theme_json,
+                "media_spin_price_gems": m.media_spin_price_gems,
+                "media_spin_price_stars": m.media_spin_price_stars,
+                "rarity_weights_json": m.rarity_weights_json,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in models
@@ -709,6 +751,9 @@ async def create_model(
         owner_user_id=current_user.id,
         bot_token=request.bot_token.strip() if request.bot_token else None,
         theme_json=request.theme_json,
+        media_spin_price_gems=request.media_spin_price_gems,
+        media_spin_price_stars=request.media_spin_price_stars,
+        rarity_weights_json=request.rarity_weights_json,
     )
     session.add(model)
     await session.commit()
@@ -720,6 +765,9 @@ async def create_model(
         owner_user_id=model.owner_user_id,
         bot_token=model.bot_token,
         theme_json=model.theme_json,
+        media_spin_price_gems=model.media_spin_price_gems,
+        media_spin_price_stars=model.media_spin_price_stars,
+        rarity_weights_json=model.rarity_weights_json,
         created_at=model.created_at.isoformat() if model.created_at else None,
     )
 
@@ -741,6 +789,9 @@ async def get_model(
         owner_user_id=model.owner_user_id,
         bot_token=model.bot_token,
         theme_json=model.theme_json,
+        media_spin_price_gems=model.media_spin_price_gems,
+        media_spin_price_stars=model.media_spin_price_stars,
+        rarity_weights_json=model.rarity_weights_json,
         created_at=model.created_at.isoformat() if model.created_at else None,
     )
 
@@ -752,7 +803,7 @@ async def update_model(
     current_user: CurrentUser = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    """Обновить параметры модели (имя, bot_token, theme_json)."""
+    """Обновить параметры модели (имя, bot_token, theme_json, цены, веса редкости)."""
     model = await session.get(Model, model_id)
     if not model or model.owner_user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -766,6 +817,12 @@ async def update_model(
             model.bot_token = value.strip() if value else None
         elif key == "theme_json":
             model.theme_json = value
+        elif key in (
+            "media_spin_price_gems",
+            "media_spin_price_stars",
+            "rarity_weights_json",
+        ):
+            setattr(model, key, value)
 
     await session.commit()
     await session.refresh(model)
@@ -776,5 +833,8 @@ async def update_model(
         owner_user_id=model.owner_user_id,
         bot_token=model.bot_token,
         theme_json=model.theme_json,
+        media_spin_price_gems=model.media_spin_price_gems,
+        media_spin_price_stars=model.media_spin_price_stars,
+        rarity_weights_json=model.rarity_weights_json,
         created_at=model.created_at.isoformat() if model.created_at else None,
     )
