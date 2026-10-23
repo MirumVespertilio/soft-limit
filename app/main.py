@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,11 +20,25 @@ from app.api.admin.media import router as admin_media_router
 from app.api.media.router import router as media_router
 from app.api.models.router import router as models_router
 from app.api.webhook.router import router as webhook_router
+from app.db import async_session
+from bot.manager import bot_manager
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Регистрируем ботов моделей из БД и выставляем их Telegram webhook'и
+    try:
+        async with async_session() as session:
+            count = await bot_manager.load_all_model_bots(session)
+        if count:
+            logger.info("Loaded %d model bot(s) at startup", count)
+        await bot_manager.set_all_webhooks()
+    except Exception:
+        logger.exception("Startup model-bot registration failed")
     yield
+    await bot_manager.close_all()
 
 
 app = FastAPI(title="Soft Limit", version="0.1.0", lifespan=lifespan)

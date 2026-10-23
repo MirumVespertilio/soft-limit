@@ -758,6 +758,13 @@ async def create_model(
     await session.commit()
     await session.refresh(model)
 
+    if model.bot_token:
+        from bot.manager import bot_manager
+
+        await bot_manager.setup_model_bot(
+            model_id=model.id, model_name=model.name, bot_token=model.bot_token
+        )
+
     return ModelResponse(
         id=model.id,
         name=model.name,
@@ -825,6 +832,16 @@ async def update_model(
 
     await session.commit()
     await session.refresh(model)
+
+    if request.bot_token is not None:
+        from bot.manager import bot_manager
+
+        if model.bot_token:
+            await bot_manager.setup_model_bot(
+                model_id=model.id, model_name=model.name, bot_token=model.bot_token
+            )
+        else:
+            await bot_manager.set_all_webhooks()
 
     return ModelResponse(
         id=model.id,
