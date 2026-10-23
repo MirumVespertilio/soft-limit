@@ -1,7 +1,15 @@
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,7 +37,9 @@ class MediaAsset(Base):
     __tablename__ = "media_assets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    file_type: Mapped[MediaType] = mapped_column(SAEnum(MediaType, values_callable=lambda x: [e.value for e in x]))
+    file_type: Mapped[MediaType] = mapped_column(
+        SAEnum(MediaType, values_callable=lambda x: [e.value for e in x])
+    )
     telegram_file_id: Mapped[str] = mapped_column(String(256))
     telegram_file_unique_id: Mapped[str] = mapped_column(String(256))
     mime_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -39,9 +49,13 @@ class MediaAsset(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider: Mapped[str] = mapped_column(String(64), default="telegram")
     processing_state: Mapped[str] = mapped_column(String(32), default="ready")
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    content_links: Mapped[list["ContentItemMedia"]] = relationship(back_populates="media", cascade="all, delete-orphan")
+    content_links: Mapped[list["ContentItemMedia"]] = relationship(
+        back_populates="media", cascade="all, delete-orphan"
+    )
 
 
 class Rarity(PyEnum):
@@ -66,8 +80,13 @@ class ContentItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[ContentStatus] = mapped_column(SAEnum(ContentStatus, values_callable=lambda x: [e.value for e in x]), default=ContentStatus.DRAFT)
-    media_type: Mapped[MediaType] = mapped_column(SAEnum(MediaType, values_callable=lambda x: [e.value for e in x]))
+    status: Mapped[ContentStatus] = mapped_column(
+        SAEnum(ContentStatus, values_callable=lambda x: [e.value for e in x]),
+        default=ContentStatus.DRAFT,
+    )
+    media_type: Mapped[MediaType] = mapped_column(
+        SAEnum(MediaType, values_callable=lambda x: [e.value for e in x])
+    )
     rarity: Mapped[Rarity] = mapped_column(
         SAEnum(Rarity, values_callable=lambda x: [e.value for e in x]),
         default=Rarity.RARE,
@@ -77,9 +96,13 @@ class ContentItem(Base):
         ForeignKey("models.id", ondelete="CASCADE"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
-    media: Mapped[list["ContentItemMedia"]] = relationship(back_populates="content_item", cascade="all, delete-orphan")
+    media: Mapped[list["ContentItemMedia"]] = relationship(
+        back_populates="content_item", cascade="all, delete-orphan"
+    )
 
 
 class ContentItemMedia(Base):
@@ -88,7 +111,9 @@ class ContentItemMedia(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     content_item_id: Mapped[int] = mapped_column(ForeignKey("content_items.id", ondelete="CASCADE"))
     media_asset_id: Mapped[int] = mapped_column(ForeignKey("media_assets.id", ondelete="CASCADE"))
-    role: Mapped[FileRole] = mapped_column(SAEnum(FileRole, values_callable=lambda x: [e.value for e in x]))
+    role: Mapped[FileRole] = mapped_column(
+        SAEnum(FileRole, values_callable=lambda x: [e.value for e in x])
+    )
     position: Mapped[int] = mapped_column(Integer, default=0)
 
     content_item: Mapped["ContentItem"] = relationship(back_populates="media")

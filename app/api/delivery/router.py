@@ -24,6 +24,7 @@ async def deliver_item(
         return {"delivery_id": delivery.id, "status": delivery.status.value}
 
     from app.telegram import create_telegram_bot
+
     bot = create_telegram_bot()
     try:
         delivery = await execute_delivery(session, bot, delivery.id)
@@ -52,5 +53,7 @@ async def delivery_status(
         "status": delivery.status.value,
         "attempts": delivery.attempts,
         "last_error": delivery.last_error,
-        "last_attempt_at": delivery.last_attempt_at.isoformat() if delivery.last_attempt_at else None,
+        "last_attempt_at": (
+            delivery.last_attempt_at.isoformat() if delivery.last_attempt_at else None
+        ),
     }

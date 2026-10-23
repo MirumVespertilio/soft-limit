@@ -5,6 +5,7 @@
 - require_admin     — проверяет роль через БД (а не хардкод telegram_id)
 - get_current_telegram_id / get_current_user_id — оставлены для совместимости
 """
+
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException
@@ -23,6 +24,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 @dataclass
 class CurrentUser:
     """DTO текущего авторизованного пользователя."""
+
     id: int
     telegram_id: int
     role: str  # "user" | "admin"
@@ -41,17 +43,13 @@ async def get_current_user(
     telegram_id: int = token_data["telegram_id"]
     model_id: int | None = token_data.get("model_id")
 
-    result = await session.execute(
-        select(User).where(User.telegram_id == telegram_id)
-    )
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     # Достаём роль из БД (актуальная), fallback — "user"
-    role_result = await session.execute(
-        select(UserRole).where(UserRole.user_id == user.id)
-    )
+    role_result = await session.execute(select(UserRole).where(UserRole.user_id == user.id))
     role_row = role_result.scalar_one_or_none()
     role = role_row.role.value if role_row else RoleType.USER.value
 
@@ -68,6 +66,7 @@ async def require_admin(
 
 
 # ── Обратная совместимость ─────────────────────────────────────────────────────
+
 
 async def get_current_telegram_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),

@@ -33,27 +33,29 @@ async def get_preview(
         raise HTTPException(status_code=404, detail="Media not found")
 
     inv_result = await session.execute(
-        select(UserInventory.id).where(
+        select(UserInventory.id)
+        .where(
             UserInventory.user_id == user_id,
             UserInventory.content_item_id == link.content_item_id,
-        ).limit(1)
+        )
+        .limit(1)
     )
     has_won = inv_result.scalars().first() is not None
 
     if not has_won:
-        wheel_result = await session.execute(
-            select(Wheel).where(Wheel.status == "active").limit(1)
-        )
+        wheel_result = await session.execute(select(Wheel).where(Wheel.status == "active").limit(1))
         wheel = wheel_result.scalars().first()
         if not wheel:
             raise HTTPException(status_code=403, detail="Access denied")
 
         seg_result = await session.execute(
-            select(WheelSegment.id).where(
+            select(WheelSegment.id)
+            .where(
                 WheelSegment.wheel_id == wheel.id,
                 WheelSegment.content_item_id == link.content_item_id,
-                WheelSegment.is_active == True,
-            ).limit(1)
+                WheelSegment.is_active.is_(True),
+            )
+            .limit(1)
         )
         if not seg_result.scalars().first():
             raise HTTPException(status_code=403, detail="Access denied")

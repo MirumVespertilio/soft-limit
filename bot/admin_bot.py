@@ -5,8 +5,9 @@
 - Привязка ботов и тем оформления
 - Аналитика и статистика выручки
 """
+
 import asyncio
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 
@@ -21,16 +22,19 @@ def get_admin_dispatcher() -> Dispatcher:
     async def cmd_admin_start(message: Message):
         admin_webapp_url = f"{settings.APP_BASE_URL}/static/admin/index.html"
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="🛠 Открыть панель управления",
-                    web_app=WebAppInfo(url=admin_webapp_url),
-                )
-            ]]
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🛠 Открыть панель управления",
+                        web_app=WebAppInfo(url=admin_webapp_url),
+                    )
+                ]
+            ]
         )
         await message.answer(
-            f"👋 Добро пожаловать в панель управления платформой!\n\n"
-            f"Здесь вы можете подключать ботов своих моделей, настраивать колесо фортуны и просматривать аналитику.",
+            "👋 Добро пожаловать в панель управления платформой!\n\n"
+            "Здесь вы можете подключать ботов своих моделей,\n"
+            "настраивать колесо фортуны и просматривать аналитику.",
             reply_markup=keyboard,
         )
 

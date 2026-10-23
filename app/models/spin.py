@@ -11,8 +11,8 @@ from app.db import Base
 class SpinType(PyEnum):
     WELCOME = "welcome"
     STANDARD = "standard"
-    BONUS = "bonus"       # Ежедневный бесплатный бонусный спин (рулетка/бонусы)
-    MEDIA = "media"       # Медиа-слоты модели с выпадением фото/видео
+    BONUS = "bonus"  # Ежедневный бесплатный бонусный спин (рулетка/бонусы)
+    MEDIA = "media"  # Медиа-слоты модели с выпадением фото/видео
 
 
 class Spin(Base):
@@ -26,7 +26,9 @@ class Spin(Base):
         SAEnum(SpinType, values_callable=lambda x: [e.value for e in x]),
         default=SpinType.STANDARD,
     )
-    content_item_id: Mapped[int | None] = mapped_column(ForeignKey("content_items.id"), nullable=True)
+    content_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("content_items.id"), nullable=True
+    )
     segment_id: Mapped[int | None] = mapped_column(ForeignKey("wheel_segments.id"), nullable=True)
     cost_spins: Mapped[int] = mapped_column(Integer, default=1)
     cost_gems: Mapped[int] = mapped_column(Integer, default=0)

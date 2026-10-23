@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test_token_for_tests")
 os.environ.setdefault("SECRET_KEY", "test_secret_key_for_tests")
 os.environ.setdefault("ADMIN_TELEGRAM_ID", "999999")
@@ -60,7 +61,9 @@ async def concurrent_engine():
 
 @pytest_asyncio.fixture
 async def concurrent_client(concurrent_engine):
-    async_session_factory = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session_factory = async_sessionmaker(
+        concurrent_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async def override_get_session():
         async with async_session_factory() as s:

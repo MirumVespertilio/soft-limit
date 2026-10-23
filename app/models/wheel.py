@@ -1,7 +1,16 @@
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +24,7 @@ class WheelStatus(PyEnum):
 
 class RewardType(PyEnum):
     """Тип награды сектора бонусного колеса."""
+
     NONE = "none"
     GEMS = "gems"
     SPINS = "spins"
@@ -28,11 +38,18 @@ class Wheel(Base):
     model_id: Mapped[int | None] = mapped_column(
         ForeignKey("models.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    status: Mapped[WheelStatus] = mapped_column(SAEnum(WheelStatus, values_callable=lambda x: [e.value for e in x]), default=WheelStatus.ACTIVE)
+    status: Mapped[WheelStatus] = mapped_column(
+        SAEnum(WheelStatus, values_callable=lambda x: [e.value for e in x]),
+        default=WheelStatus.ACTIVE,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
-    segments: Mapped[list["WheelSegment"]] = relationship(back_populates="wheel", cascade="all, delete-orphan")
+    segments: Mapped[list["WheelSegment"]] = relationship(
+        back_populates="wheel", cascade="all, delete-orphan"
+    )
 
 
 class WheelSegment(Base):
@@ -44,7 +61,9 @@ class WheelSegment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     wheel_id: Mapped[int] = mapped_column(ForeignKey("wheels.id", ondelete="CASCADE"), index=True)
-    content_item_id: Mapped[int | None] = mapped_column(ForeignKey("content_items.id"), nullable=True)
+    content_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("content_items.id"), nullable=True
+    )
     label: Mapped[str] = mapped_column(String(64))
     weight: Mapped[int] = mapped_column(Integer, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

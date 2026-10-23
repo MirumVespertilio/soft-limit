@@ -4,6 +4,7 @@
 - Загружает активные модели из базы данных
 - Предоставляет единую точку входа для маршрутизации вебхуков
 """
+
 import logging
 from typing import Dict
 from aiogram import Bot, Dispatcher
@@ -41,9 +42,7 @@ class MultiBotManager:
 
     async def load_all_model_bots(self, session: AsyncSession) -> int:
         """Загрузить все зарегистрированные модели с токенами из базы данных."""
-        result = await session.execute(
-            select(Model).where(Model.bot_token.isnot(None))
-        )
+        result = await session.execute(select(Model).where(Model.bot_token.isnot(None)))
         models = result.scalars().all()
         count = 0
         for m in models:

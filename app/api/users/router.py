@@ -35,9 +35,7 @@ async def get_me(
 
     user, wallet = row
 
-    role_result = await session.execute(
-        select(UserRole).where(UserRole.user_id == user.id)
-    )
+    role_result = await session.execute(select(UserRole).where(UserRole.user_id == user.id))
     role_row = role_result.scalar_one_or_none()
     user_is_admin = (role_row.role == RoleType.ADMIN) if role_row else False
 

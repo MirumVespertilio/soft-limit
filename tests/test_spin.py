@@ -32,10 +32,16 @@ async def _setup_wheel(session):
     session.add(wheel)
     await session.flush()
 
-    session.add_all([
-        WheelSegment(wheel_id=wheel.id, content_item_id=item1.id, label="Prize 1", weight=1, position=0),
-        WheelSegment(wheel_id=wheel.id, content_item_id=item2.id, label="Prize 2", weight=1, position=1),
-    ])
+    session.add_all(
+        [
+            WheelSegment(
+                wheel_id=wheel.id, content_item_id=item1.id, label="Prize 1", weight=1, position=0
+            ),
+            WheelSegment(
+                wheel_id=wheel.id, content_item_id=item2.id, label="Prize 2", weight=1, position=1
+            ),
+        ]
+    )
     await session.commit()
     return item1.id
 
@@ -225,11 +231,13 @@ async def test_duplicate_delivery(mock_bot_cls, client, session):
     session.add(asset)
     await session.flush()
 
-    session.add(ContentItemMedia(
-        content_item_id=item_id,
-        media_asset_id=asset.id,
-        role=FileRole.MAIN,
-    ))
+    session.add(
+        ContentItemMedia(
+            content_item_id=item_id,
+            media_asset_id=asset.id,
+            role=FileRole.MAIN,
+        )
+    )
     await session.commit()
 
     await client.post(
@@ -286,11 +294,13 @@ async def test_media_preview_unauthorized(mock_bot_cls, client, session):
     session.add(asset)
     await session.flush()
 
-    session.add(ContentItemMedia(
-        content_item_id=item_id,
-        media_asset_id=asset.id,
-        role=FileRole.PREVIEW,
-    ))
+    session.add(
+        ContentItemMedia(
+            content_item_id=item_id,
+            media_asset_id=asset.id,
+            role=FileRole.PREVIEW,
+        )
+    )
     await session.commit()
 
     response = await client.get(

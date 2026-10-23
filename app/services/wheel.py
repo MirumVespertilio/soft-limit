@@ -8,9 +8,7 @@ from app.models.content import ContentItem, ContentStatus
 
 
 async def get_active_wheel(session: AsyncSession) -> Wheel | None:
-    result = await session.execute(
-        select(Wheel).where(Wheel.status == "active").order_by(Wheel.id)
-    )
+    result = await session.execute(select(Wheel).where(Wheel.status == "active").order_by(Wheel.id))
     return result.scalars().first()
 
 
@@ -20,7 +18,7 @@ async def get_active_segments(session: AsyncSession, wheel_id: int) -> list[Whee
         .join(ContentItem, WheelSegment.content_item_id == ContentItem.id)
         .where(
             WheelSegment.wheel_id == wheel_id,
-            WheelSegment.is_active == True,
+            WheelSegment.is_active.is_(True),
             ContentItem.status == ContentStatus.PUBLISHED,
         )
         .order_by(WheelSegment.position)

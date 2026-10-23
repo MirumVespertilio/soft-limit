@@ -4,10 +4,20 @@ GEMS — единственная внутренняя игровая валют
 Telegram Stars — внешняя валюта Telegram, за которую покупаются GEMS.
 spins_balance — счётчик спинов (не валюта, не торгуется напрямую).
 """
+
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,9 +35,8 @@ class TransactionReason(PyEnum):
     ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
     SPIN = "SPIN"
     DAILY_FREE_SPIN = "DAILY_FREE_SPIN"
-    MEDIA_SPIN_PURCHASE = "MEDIA_SPIN_PURCHASE"
     TELEGRAM_STARS_PURCHASE = "TELEGRAM_STARS_PURCHASE"  # пополнение GEMS за Telegram Stars
-    DUPLICATE_REFUND = "DUPLICATE_REFUND"                # возврат GEMS за дубликат медиа
+    DUPLICATE_REFUND = "DUPLICATE_REFUND"  # возврат GEMS за дубликат медиа
 
 
 class UserWallet(Base):
@@ -56,7 +65,9 @@ class WalletTransaction(Base):
     __tablename__ = "wallet_transactions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    wallet_id: Mapped[int] = mapped_column(ForeignKey("user_wallets.id", ondelete="CASCADE"), index=True)
+    wallet_id: Mapped[int] = mapped_column(
+        ForeignKey("user_wallets.id", ondelete="CASCADE"), index=True
+    )
     resource: Mapped[TransactionResource] = mapped_column(
         SAEnum(TransactionResource, values_callable=lambda x: [e.value for e in x])
     )
@@ -74,6 +85,7 @@ class WalletTransaction(Base):
 
 class GemPackage(Base):
     """Пакет GEMS, доступный для покупки за Telegram Stars."""
+
     __tablename__ = "gem_packages"
 
     __table_args__ = (
@@ -83,8 +95,8 @@ class GemPackage(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
-    gems_amount: Mapped[int] = mapped_column(Integer)       # сколько GEMS в пакете
-    price_stars: Mapped[int] = mapped_column(Integer)       # цена в Telegram Stars (XTR)
+    gems_amount: Mapped[int] = mapped_column(Integer)  # сколько GEMS в пакете
+    price_stars: Mapped[int] = mapped_column(Integer)  # цена в Telegram Stars (XTR)
     is_active: Mapped[bool] = mapped_column(default=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -92,13 +104,14 @@ class GemPackage(Base):
 
 class GemPurchase(Base):
     """История покупок GEMS за Telegram Stars."""
+
     __tablename__ = "gem_purchases"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     package_id: Mapped[int | None] = mapped_column(ForeignKey("gem_packages.id"), nullable=True)
     gems_added: Mapped[int] = mapped_column(Integer)
-    price_stars: Mapped[int] = mapped_column(Integer)       # фактически уплачено Stars
+    price_stars: Mapped[int] = mapped_column(Integer)  # фактически уплачено Stars
     telegram_payment_charge_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

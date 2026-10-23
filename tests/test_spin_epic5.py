@@ -42,16 +42,18 @@ async def _create_wheel(session, model_id: int, segments: list[dict]) -> int:
     session.add(wheel)
     await session.flush()
     for i, seg in enumerate(segments):
-        session.add(WheelSegment(
-            wheel_id=wheel.id,
-            content_item_id=seg.get("content_item_id"),
-            label=seg["label"],
-            weight=seg.get("weight", 1),
-            position=i,
-            reward_type=seg.get("reward_type", RewardType.NONE),
-            reward_gems=seg.get("reward_gems", 0),
-            reward_spins=seg.get("reward_spins", 0),
-        ))
+        session.add(
+            WheelSegment(
+                wheel_id=wheel.id,
+                content_item_id=seg.get("content_item_id"),
+                label=seg["label"],
+                weight=seg.get("weight", 1),
+                position=i,
+                reward_type=seg.get("reward_type", RewardType.NONE),
+                reward_gems=seg.get("reward_gems", 0),
+                reward_spins=seg.get("reward_spins", 0),
+            )
+        )
     await session.commit()
     return wheel.id
 
@@ -71,9 +73,13 @@ async def _create_content(session, model_id: int, title: str, rarity: Rarity = R
 
 async def test_wheel_spin_rewards(client, session):
     token, model, user = await _create_user_with_model(client, session, 100001)
-    await _create_wheel(session, model.id, [
-        {"label": "+5 GEMS", "reward_type": RewardType.GEMS, "reward_gems": 5, "weight": 1},
-    ])
+    await _create_wheel(
+        session,
+        model.id,
+        [
+            {"label": "+5 GEMS", "reward_type": RewardType.GEMS, "reward_gems": 5, "weight": 1},
+        ],
+    )
     await _set_balances(session, user.id, gems=0, spins=1)
 
     response = await client.post(
@@ -86,9 +92,9 @@ async def test_wheel_spin_rewards(client, session):
     assert data["spin_type"] == "bonus"
     assert data["reward_gems"] == 5
 
-    wallet = (await session.execute(
-        select(UserWallet).where(UserWallet.user_id == user.id)
-    )).scalar_one()
+    wallet = (
+        await session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+    ).scalar_one()
     assert wallet.spins_balance == 0
     assert wallet.gems_balance == 5
 
@@ -117,14 +123,16 @@ async def test_wheel_spin_idempotent(client, session):
     r2 = await client.post("/api/v1/spins/wheel", json={"idempotency_key": "idem"}, headers=headers)
 
     assert r1.json()["spin_id"] == r2.json()["spin_id"]
-    spins = (await session.execute(
-        select(Spin).where(Spin.spin_type == SpinType.BONUS)
-    )).scalars().all()
+    spins = (
+        (await session.execute(select(Spin).where(Spin.spin_type == SpinType.BONUS)))
+        .scalars()
+        .all()
+    )
     assert len(spins) == 1
 
-    wallet = (await session.execute(
-        select(UserWallet).where(UserWallet.user_id == user.id)
-    )).scalar_one()
+    wallet = (
+        await session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+    ).scalar_one()
     assert wallet.spins_balance == 0
 
 
@@ -141,9 +149,9 @@ async def test_daily_free_spin(client, session):
     assert r2.status_code == 200
     assert r2.json()["granted"] is False
 
-    wallet = (await session.execute(
-        select(UserWallet).where(UserWallet.user_id == user.id)
-    )).scalar_one()
+    wallet = (
+        await session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+    ).scalar_one()
     assert wallet.spins_balance == 1
 
 
@@ -165,14 +173,16 @@ async def test_media_spin_gems(client, session):
     assert data["rarity"] == "rare"
     assert data["is_duplicate"] is False
 
-    wallet = (await session.execute(
-        select(UserWallet).where(UserWallet.user_id == user.id)
-    )).scalar_one()
+    wallet = (
+        await session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+    ).scalar_one()
     assert wallet.gems_balance == 0
 
-    inventory = (await session.execute(
-        select(UserInventory).where(UserInventory.user_id == user.id)
-    )).scalars().all()
+    inventory = (
+        (await session.execute(select(UserInventory).where(UserInventory.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert len(inventory) == 1
 
 
@@ -191,14 +201,16 @@ async def test_media_spin_duplicate_refund(client, session):
     assert r2.json()["is_duplicate"] is True
     assert r2.json()["reward_gems"] == 1
 
-    wallet = (await session.execute(
-        select(UserWallet).where(UserWallet.user_id == user.id)
-    )).scalar_one()
+    wallet = (
+        await session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+    ).scalar_one()
     assert wallet.gems_balance == 1
 
-    inventory = (await session.execute(
-        select(UserInventory).where(UserInventory.user_id == user.id)
-    )).scalars().all()
+    inventory = (
+        (await session.execute(select(UserInventory).where(UserInventory.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert len(inventory) == 1
 
 
@@ -220,11 +232,19 @@ async def test_media_spin_insufficient_gems(client, session):
 
 async def test_media_spin_stars(client, session):
     token, model, user = await _create_user_with_model(
-        client, session, 100008, media_spin_price_gems=10, media_spin_price_stars=5,
-        rarity_weights_json='{"rare": 100}'
+        client,
+        session,
+        100008,
+        media_spin_price_gems=10,
+        media_spin_price_stars=5,
+        rarity_weights_json='{"rare": 100}',
     )
     await _create_content(session, model.id, "Media Stars", Rarity.RARE)
     await _set_balances(session, user.id, gems=0, spins=0)
+
+    from tests.test_gems_and_payments import _seed_verified_payment
+
+    await _seed_verified_payment(session, user.id, "stars-1", 5, "tg_charge_media_1")
 
     response = await client.post(
         "/api/v1/spins/media/complete",
@@ -236,9 +256,9 @@ async def test_media_spin_stars(client, session):
     assert data["spin_type"] == "media"
     assert data["cost_stars"] == 5
 
-    wallet = (await session.execute(
-        select(UserWallet).where(UserWallet.user_id == user.id)
-    )).scalar_one()
+    wallet = (
+        await session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+    ).scalar_one()
     assert wallet.gems_balance == 0
 
 
@@ -273,7 +293,9 @@ async def test_get_spin_by_id(client, session):
     await _set_balances(session, user.id, gems=10, spins=0)
     headers = {"Authorization": f"Bearer {token}"}
 
-    spin = await client.post("/api/v1/spins/media", json={"idempotency_key": "by-id"}, headers=headers)
+    spin = await client.post(
+        "/api/v1/spins/media", json={"idempotency_key": "by-id"}, headers=headers
+    )
     spin_id = spin.json()["spin_id"]
 
     response = await client.get(f"/api/v1/spins/{spin_id}", headers=headers)

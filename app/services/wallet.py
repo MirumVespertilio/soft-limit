@@ -2,7 +2,6 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.wallet import UserWallet, WalletTransaction, TransactionResource, TransactionReason
-from app.models.user import User
 
 
 class InsufficientBalanceError(Exception):

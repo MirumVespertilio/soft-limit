@@ -4,6 +4,7 @@
 Возможные значения: 'user' (обычный игрок), 'admin' (владелец модели).
 Архитектурно предусмотрено масштабирование под будущий multi-tenant SaaS.
 """
+
 from enum import Enum as PyEnum
 
 from sqlalchemy import Enum as SAEnum, ForeignKey, UniqueConstraint
@@ -14,6 +15,7 @@ from app.db import Base
 
 class RoleType(PyEnum):
     """Допустимые роли пользователей в системе."""
+
     USER = "user"
     ADMIN = "admin"
 

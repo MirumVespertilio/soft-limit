@@ -1,13 +1,12 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import update
 from app.models.delivery import MediaDelivery, DeliveryStatus
 from app.models.inventory import UserInventory
-from app.models.content import ContentItem, ContentItemMedia, MediaAsset, MediaType, FileRole
+from app.models.content import ContentItemMedia, MediaAsset, MediaType, FileRole
 from app.models.user import User
 
 
@@ -44,7 +43,8 @@ async def request_delivery(
     main_link = max(main_links, key=lambda m: m.id, default=None)
     preview_asset_ids = {m.media_asset_id for m in media_links if m.role == FileRole.PREVIEW}
     original_links = [
-        m for m in media_links
+        m
+        for m in media_links
         if m.role == FileRole.ORIGINAL and m.media_asset_id not in preview_asset_ids
     ]
     original_link = max(original_links, key=lambda m: m.id, default=None)

@@ -14,10 +14,22 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    welcome_spin_granted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    welcome_spin_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_daily_wheel_spin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    registered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    welcome_spin_granted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    welcome_spin_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_daily_wheel_spin_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
-    wallet: Mapped["UserWallet"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    role: Mapped["UserRole"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    wallet: Mapped["UserWallet"] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    role: Mapped["UserRole"] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )

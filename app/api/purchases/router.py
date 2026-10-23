@@ -8,6 +8,7 @@ from app.api.deps import get_current_user, get_current_user_id, CurrentUser
 from app.db import get_session
 from app.models.purchases import SpinPackage, SpinPurchase
 from app.models.wallet import GemPackage, GemPurchase, TransactionResource, TransactionReason
+from app.models.model import Model
 from app.services.wallet import adjust_balance, InsufficientBalanceError
 from app.telegram import create_telegram_bot
 
@@ -18,15 +19,16 @@ router = APIRouter(prefix="/api/v1", tags=["purchases"])
 # Покупка спинов за GEMS (внутренняя валюта)
 # ==============================================================================
 
+
 @router.get("/spin-packages")
 async def list_spin_packages(
     current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(SpinPackage).where(SpinPackage.is_active == True)
+    query = select(SpinPackage).where(SpinPackage.is_active.is_(True))
     if current_user.model_id is not None:
         query = query.where(
-            (SpinPackage.model_id == None) | (SpinPackage.model_id == current_user.model_id)
+            (SpinPackage.model_id.is_(None)) | (SpinPackage.model_id == current_user.model_id)
         )
     result = await session.execute(query.order_by(SpinPackage.position))
     packages = result.scalars().all()
@@ -37,6 +39,7 @@ async def list_spin_packages(
                 "name": p.name,
                 "spins_count": p.spins_count,
                 "price_gems": p.price_gems,
+                "price_stars": p.price_stars,
                 "model_id": p.model_id,
             }
             for p in packages
@@ -123,8 +126,167 @@ async def purchase_spin_package(
 
 
 # ==============================================================================
+# Покупка спинов за Telegram Stars (Bootstrap-инвойс от бота модели)
+# ==============================================================================
+
+
+class SpinInvoiceRequest(BaseModel):
+    package_id: int
+    idempotency_key: str | None = None
+
+
+class SpinCompleteRequest(BaseModel):
+    package_id: int
+    idempotency_key: str
+    telegram_payment_charge_id: str | None = None
+
+
+class SpinInvoiceResponse(BaseModel):
+    invoice_link: str
+    package_id: int
+    spins_count: int
+    price_stars: int
+    idempotency_key: str
+
+
+class SpinCompleteResponse(BaseModel):
+    purchase_id: int
+    spins_added: int
+    price_stars: int
+
+
+@router.post("/spin-purchases/invoice-link", response_model=SpinInvoiceResponse)
+async def create_spin_invoice_link(
+    request: SpinInvoiceRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Создаёт stars-инвойс пакета спинов от бота модели пользователя."""
+    package = await session.get(SpinPackage, request.package_id)
+    if not package or not package.is_active:
+        raise HTTPException(status_code=404, detail="Package not found")
+    if package.model_id is not None and package.model_id != current_user.model_id:
+        raise HTTPException(status_code=404, detail="Package not found")
+    if package.price_stars <= 0:
+        raise HTTPException(
+            status_code=400, detail="Stars purchase is not configured for this package"
+        )
+    if current_user.model_id is None:
+        raise HTTPException(status_code=400, detail="model_id is required")
+
+    model = await session.get(Model, current_user.model_id)
+    if not model or not model.bot_token:
+        raise HTTPException(status_code=400, detail="Model bot is not configured")
+
+    from uuid import uuid4
+    from app.services.payments import create_order, build_invoice_payload
+
+    idem_key = request.idempotency_key or uuid4().hex
+    order = await create_order(
+        session=session,
+        user_id=current_user.id,
+        product_type="spin_package",
+        product_id=package.id,
+        amount=package.price_stars,
+    )
+    payload = build_invoice_payload(order.id, idem_key)
+
+    bot = create_telegram_bot(model.bot_token)
+    try:
+        invoice_link = await bot.create_invoice_link(
+            title=f"{package.spins_count} Spins",
+            description=f"Покупка {package.spins_count} спинов",
+            payload=payload,
+            currency="XTR",
+            prices=[LabeledPrice(label=f"{package.spins_count} Spins", amount=package.price_stars)],
+        )
+    finally:
+        await bot.session.close()
+
+    return SpinInvoiceResponse(
+        invoice_link=invoice_link,
+        package_id=package.id,
+        spins_count=package.spins_count,
+        price_stars=package.price_stars,
+        idempotency_key=idem_key,
+    )
+
+
+@router.post("/spin-purchases/complete", response_model=SpinCompleteResponse)
+async def complete_spin_purchase(
+    request: SpinCompleteRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Начисляет спины после оплаты Telegram Stars (идемпотентно)."""
+    idem_key = request.idempotency_key
+
+    existing = await session.execute(
+        select(SpinPurchase).where(
+            SpinPurchase.user_id == current_user.id,
+            SpinPurchase.idempotency_key == idem_key,
+        )
+    )
+    existing_purchase = existing.scalar_one_or_none()
+    if existing_purchase:
+        return SpinCompleteResponse(
+            purchase_id=existing_purchase.id,
+            spins_added=existing_purchase.spins_added,
+            price_stars=existing_purchase.cost_stars,
+        )
+
+    package = await session.get(SpinPackage, request.package_id)
+    if not package or not package.is_active:
+        raise HTTPException(status_code=404, detail="Package not found")
+    if package.model_id is not None and package.model_id != current_user.model_id:
+        raise HTTPException(status_code=404, detail="Package not found")
+    if package.price_stars <= 0:
+        raise HTTPException(
+            status_code=400, detail="Stars purchase is not configured for this package"
+        )
+
+    from app.services.payments import get_verified_payment
+
+    await get_verified_payment(
+        session,
+        user_id=current_user.id,
+        idempotency_key=idem_key,
+        expected_amount=package.price_stars,
+    )
+
+    await adjust_balance(
+        session=session,
+        user_id=current_user.id,
+        resource=TransactionResource.SPINS,
+        amount=package.spins_count,
+        reason=TransactionReason.TELEGRAM_STARS_PURCHASE,
+        reference_id=str(package.id),
+        note=request.telegram_payment_charge_id,
+    )
+
+    purchase = SpinPurchase(
+        user_id=current_user.id,
+        package_id=package.id,
+        price_gems=0,
+        cost_stars=package.price_stars,
+        spins_added=package.spins_count,
+        model_id=package.model_id,
+        idempotency_key=idem_key,
+    )
+    session.add(purchase)
+    await session.commit()
+
+    return SpinCompleteResponse(
+        purchase_id=purchase.id,
+        spins_added=package.spins_count,
+        price_stars=package.price_stars,
+    )
+
+
+# ==============================================================================
 # Покупка GEMS за реальные Telegram Stars (Payments API)
 # ==============================================================================
+
 
 @router.get("/gem-packages")
 async def list_gem_packages(
@@ -132,7 +294,7 @@ async def list_gem_packages(
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
-        select(GemPackage).where(GemPackage.is_active == True).order_by(GemPackage.position)
+        select(GemPackage).where(GemPackage.is_active.is_(True)).order_by(GemPackage.position)
     )
     packages = result.scalars().all()
     return {
@@ -150,6 +312,7 @@ async def list_gem_packages(
 
 class CreateInvoiceLinkRequest(BaseModel):
     package_id: int
+    idempotency_key: str | None = None
 
 
 class CreateInvoiceLinkResponse(BaseModel):
@@ -157,21 +320,40 @@ class CreateInvoiceLinkResponse(BaseModel):
     package_id: int
     gems_amount: int
     price_stars: int
+    idempotency_key: str
 
 
 @router.post("/gem-purchases/invoice-link", response_model=CreateInvoiceLinkResponse)
 async def create_gem_invoice_link(
     request: CreateInvoiceLinkRequest,
-    user_id: int = Depends(get_current_user_id),
+    current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Создает invoice link Telegram Stars для открытия встроенного окна оплаты Telegram."""
+    """Создает invoice link Telegram Stars от бота модели пользователя."""
     package = await session.get(GemPackage, request.package_id)
     if not package or not package.is_active:
         raise HTTPException(status_code=404, detail="Gem package not found")
+    if current_user.model_id is None:
+        raise HTTPException(status_code=400, detail="model_id is required")
 
-    payload = f"gems_{user_id}_{package.id}"
-    bot = create_telegram_bot()
+    model = await session.get(Model, current_user.model_id)
+    if not model or not model.bot_token:
+        raise HTTPException(status_code=400, detail="Model bot is not configured")
+
+    from uuid import uuid4
+    from app.services.payments import create_order, build_invoice_payload
+
+    idem_key = request.idempotency_key or uuid4().hex
+    order = await create_order(
+        session=session,
+        user_id=current_user.id,
+        product_type="gems_package",
+        product_id=package.id,
+        amount=package.price_stars,
+    )
+    payload = build_invoice_payload(order.id, idem_key)
+
+    bot = create_telegram_bot(model.bot_token)
     try:
         invoice_link = await bot.create_invoice_link(
             title=f"{package.gems_amount} Gems",
@@ -188,6 +370,7 @@ async def create_gem_invoice_link(
         package_id=package.id,
         gems_amount=package.gems_amount,
         price_stars=package.price_stars,
+        idempotency_key=idem_key,
     )
 
 
@@ -229,6 +412,15 @@ async def complete_gem_purchase(
     package = await session.get(GemPackage, request.package_id)
     if not package or not package.is_active:
         raise HTTPException(status_code=404, detail="Gem package not found")
+
+    from app.services.payments import get_verified_payment
+
+    await get_verified_payment(
+        session,
+        user_id=user_id,
+        idempotency_key=idem_key,
+        expected_amount=package.price_stars,
+    )
 
     # Начисляем GEMS на баланс пользователя
     await adjust_balance(

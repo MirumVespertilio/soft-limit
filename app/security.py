@@ -18,7 +18,9 @@ def verify_telegram_init_data(init_data: str) -> dict:
         raise HTTPException(status_code=401, detail="Missing hash")
 
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
-    secret_key = hmac.new(b"WebAppData", settings.TELEGRAM_BOT_TOKEN.encode(), hashlib.sha256).digest()
+    secret_key = hmac.new(
+        b"WebAppData", settings.TELEGRAM_BOT_TOKEN.encode(), hashlib.sha256
+    ).digest()
     computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(computed_hash, received_hash):

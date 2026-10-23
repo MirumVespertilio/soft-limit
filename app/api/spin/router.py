@@ -16,7 +16,7 @@ from app.models.content import ContentItem, ContentStatus
 from app.models.inventory import UserInventory, InventorySource
 from app.models.wallet import TransactionResource, TransactionReason
 from app.models.model import Model
-from app.services.wallet import adjust_balance, InsufficientBalanceError, get_wallet_by_user_id
+from app.services.wallet import adjust_balance, InsufficientBalanceError
 from app.services.wheel import get_active_wheel, get_active_segments, weighted_random_choice
 from app.models.welcome import WelcomeRewardItem
 from app.services.spin import (
@@ -35,6 +35,7 @@ from app.services.spin import (
     send_media_to_chat,
 )
 from app.telegram import create_telegram_bot
+from app.utils.media import get_preview_media_id
 
 router = APIRouter(prefix="/api/v1", tags=["spin"])
 
@@ -79,15 +80,7 @@ async def create_spin(
     existing_spin = existing.scalar_one_or_none()
     if existing_spin:
         item = await session.get(ContentItem, existing_spin.content_item_id)
-        from app.models.content import ContentItemMedia, FileRole
-        preview_result = await session.execute(
-            select(ContentItemMedia.media_asset_id)
-            .where(
-                ContentItemMedia.content_item_id == item.id,
-                ContentItemMedia.role == FileRole.PREVIEW,
-            ).limit(1)
-        )
-        preview_media_id = preview_result.scalars().first()
+        preview_media_id = await get_preview_media_id(session, item.id)
         return SpinResponse(
             spin_id=existing_spin.id,
             content_item_id=item.id,
@@ -116,7 +109,7 @@ async def create_spin(
             .join(WheelSegment, WheelSegment.content_item_id == ContentItem.id)
             .where(
                 WheelSegment.wheel_id == wheel.id,
-                WheelSegment.is_active == True,
+                WheelSegment.is_active.is_(True),
                 ContentItem.status == ContentStatus.PUBLISHED,
             )
             .order_by(WelcomeRewardItem.position)
@@ -176,15 +169,7 @@ async def create_spin(
 
     await session.commit()
 
-    from app.models.content import ContentItemMedia, FileRole
-    preview_result = await session.execute(
-        select(ContentItemMedia.media_asset_id)
-        .where(
-            ContentItemMedia.content_item_id == chosen_item.id,
-            ContentItemMedia.role == FileRole.PREVIEW,
-        ).limit(1)
-    )
-    preview_media_id = preview_result.scalars().first()
+    preview_media_id = await get_preview_media_id(session, chosen_item.id)
 
     return SpinResponse(
         spin_id=spin.id,
@@ -239,7 +224,7 @@ async def daily_free_spin(
 
 
 @router.get("/spins/daily-free/status")
-async def daily_free_spin_status(
+async def get_daily_free_spin_status(
     current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -271,6 +256,7 @@ class MediaSpinRequest(BaseModel):
 
 class MediaInvoiceRequest(BaseModel):
     model_id: int
+    idempotency_key: str | None = None
 
 
 class MediaCompleteRequest(BaseModel):
@@ -311,8 +297,21 @@ async def create_media_invoice_link(
     model = await session.get(Model, request.model_id)
     if not model or model.media_spin_price_stars <= 0:
         raise HTTPException(status_code=400, detail="Media spin is not configured")
+    if not model.bot_token:
+        raise HTTPException(status_code=400, detail="Model bot is not configured")
 
-    payload = f"media_spin_{current_user.id}_{model.id}"
+    from uuid import uuid4
+    from app.services.payments import create_order, build_invoice_payload
+
+    idem_key = request.idempotency_key or uuid4().hex
+    order = await create_order(
+        session=session,
+        user_id=current_user.id,
+        product_type="media_spin",
+        product_id=model.id,
+        amount=model.media_spin_price_stars,
+    )
+    payload = build_invoice_payload(order.id, idem_key)
     bot = create_telegram_bot(model.bot_token)
     try:
         invoice_link = await bot.create_invoice_link(
@@ -329,6 +328,7 @@ async def create_media_invoice_link(
         "invoice_link": invoice_link,
         "model_id": model.id,
         "price_stars": model.media_spin_price_stars,
+        "idempotency_key": idem_key,
     }
 
 
@@ -338,6 +338,19 @@ async def complete_media_spin(
     current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    model = await session.get(Model, request.model_id)
+    if not model or model.media_spin_price_stars <= 0:
+        raise HTTPException(status_code=400, detail="Media spin is not configured")
+
+    from app.services.payments import get_verified_payment
+
+    await get_verified_payment(
+        session,
+        user_id=current_user.id,
+        idempotency_key=request.idempotency_key,
+        expected_amount=model.media_spin_price_stars,
+    )
+
     try:
         response = await complete_media_spin_with_stars(
             session,

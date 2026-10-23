@@ -449,19 +449,25 @@ async function mediaSpinWithStars() {
         if (tg?.openInvoice) {
             tg.openInvoice(data.invoice_link, async (status) => {
                 if (status === 'paid') {
-                    const compRes = await api('/spins/media/complete', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            model_id: currentModelId,
-                            idempotency_key: idemKey,
-                        }),
-                    });
-                    if (compRes.ok) {
+                    let compRes = null;
+                    for (let attempt = 0; attempt < 5; attempt++) {
+                        compRes = await api('/spins/media/complete', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                model_id: currentModelId,
+                                idempotency_key: data.idempotency_key || idemKey,
+                            }),
+                        });
+                        if (compRes.ok) break;
+                        if (compRes.status !== 409) break;
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                    if (compRes && compRes.ok) {
                         const compData = await compRes.json();
                         showResult(compData);
                         loadBalances();
                     } else {
-                        const err = await compRes.json();
+                        const err = compRes ? await compRes.json().catch(() => ({})) : {};
                         alert(err.detail || 'Не удалось завершить покупку');
                     }
                 } else {
@@ -553,17 +559,25 @@ async function loadShop() {
             list.innerHTML = '<p style="text-align:center; color:var(--text-secondary);">Нет доступных пакетов спинов</p>';
             return;
         }
-        list.innerHTML = pkgs.map(p => `
+        list.innerHTML = pkgs.map(p => {
+            const gemsBtn = p.price_gems > 0
+                ? `<button class="btn btn-primary btn-sm buy-spin-btn" data-id="${p.id}" data-price="${p.price_gems}">${p.price_gems} 💎</button>`
+                : '';
+            const starsBtn = p.price_stars > 0
+                ? `<button class="btn btn-secondary btn-sm buy-spin-stars-btn" data-id="${p.id}" data-price="${p.price_stars}">${p.price_stars} ⭐</button>`
+                : '';
+            return `
             <div class="package-card">
                 <div class="package-info">
                     <h3>${escapeHtml(p.name)}</h3>
                     <p>+${p.spins_count} спинов</p>
                 </div>
-                <button class="btn btn-primary btn-sm buy-spin-btn" data-id="${p.id}" data-price="${p.price_gems}">
-                    ${p.price_gems} 💎
-                </button>
+                <div style="display:flex; gap:6px;">
+                    ${gemsBtn}${starsBtn}
+                </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
 
         document.querySelectorAll('.buy-spin-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -572,6 +586,21 @@ async function loadShop() {
                 openConfirmModal(
                     `Купить пакет спинов за ${price} 💎?`,
                     () => buySpinPackage(pkgId)
+                );
+            });
+        });
+
+        document.querySelectorAll('.buy-spin-stars-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pkgId = parseInt(btn.getAttribute('data-id'), 10);
+                const price = parseInt(btn.getAttribute('data-price'), 10);
+                if (!tg?.openInvoice) {
+                    alert('Оплата Telegram Stars доступна только в Telegram');
+                    return;
+                }
+                openConfirmModal(
+                    `Купить пакет спинов за ${price} ⭐ (Telegram Stars)?`,
+                    () => buySpinPackageStars(pkgId)
                 );
             });
         });
@@ -669,16 +698,25 @@ async function buyGemPackage(pkgId) {
         if (tg?.openInvoice) {
             tg.openInvoice(data.invoice_link, async (status) => {
                 if (status === 'paid') {
-                    const compRes = await api('/gem-purchases/complete', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            package_id: pkgId,
-                            idempotency_key: `gem_paid_${Date.now()}`,
-                        }),
-                    });
-                    if (compRes.ok) {
+                    let compRes = null;
+                    for (let attempt = 0; attempt < 5; attempt++) {
+                        compRes = await api('/gem-purchases/complete', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                package_id: pkgId,
+                                idempotency_key: data.idempotency_key || data.idempotencyKey,
+                            }),
+                        });
+                        if (compRes.ok) break;
+                        if (compRes.status !== 409) break;
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                    if (compRes && compRes.ok) {
                         alert('Оплата прошла успешно! GEMS начислены.');
                         loadBalances();
+                    } else {
+                        const err = compRes ? await compRes.json().catch(() => ({})) : {};
+                        alert(err.detail || 'Не удалось подтвердить оплату');
                     }
                 } else if (status === 'cancelled') {
                     console.log('Payment cancelled');
@@ -691,6 +729,54 @@ async function buyGemPackage(pkgId) {
         }
     } catch (e) {
         alert('Ошибка: ' + e.message);
+    }
+}
+
+async function buySpinPackageStars(pkgId) {
+    try {
+        const res = await api('/spin-purchases/invoice-link', {
+            method: 'POST',
+            body: JSON.stringify({ package_id: pkgId }),
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.detail || 'Ошибка создания счёта');
+            return;
+        }
+
+        const data = await res.json();
+        if (tg?.openInvoice) {
+            tg.openInvoice(data.invoice_link, async (status) => {
+                if (status === 'paid') {
+                    let compRes = null;
+                    for (let attempt = 0; attempt < 5; attempt++) {
+                        compRes = await api('/spin-purchases/complete', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                package_id: pkgId,
+                                idempotency_key: data.idempotency_key,
+                            }),
+                        });
+                        if (compRes.ok) break;
+                        if (compRes.status !== 409) break;
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                    if (compRes && compRes.ok) {
+                        alert('Спины успешно добавлены!');
+                        loadBalances();
+                    } else {
+                        const err = compRes ? await compRes.json().catch(() => ({})) : {};
+                        alert(err.detail || 'Не удалось подтвердить оплату');
+                    }
+                } else if (status !== 'cancelled') {
+                    alert('Статус платежа: ' + status);
+                }
+            });
+        } else {
+            alert(`Тестовый режим: ссылка на инвойс ${data.invoice_link}`);
+        }
+    } catch (e) {
+        alert('Ошибка при покупке: ' + e.message);
     }
 }
 

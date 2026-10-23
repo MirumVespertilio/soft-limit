@@ -1,4 +1,5 @@
 """Публичный API для получения параметров модели (включая тему оформления Mini-App)."""
+
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel

@@ -4,6 +4,7 @@ POST /api/v1/auth/telegram — принимает init_data от Telegram,
   создаёт пользователя при первом входе, выдаёт JWT с ролью.
 GET  /api/v1/auth/me       — возвращает профиль текущего пользователя.
 """
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -79,14 +80,14 @@ async def telegram_auth(request: AuthRequest, session: AsyncSession = Depends(ge
 
         # Новые пользователи получают роль по умолчанию;
         # пользователь с ADMIN_TELEGRAM_ID автоматически становится admin
-        default_role = RoleType.ADMIN if telegram_id == settings.ADMIN_TELEGRAM_ID else RoleType.USER
+        default_role = (
+            RoleType.ADMIN if telegram_id == settings.ADMIN_TELEGRAM_ID else RoleType.USER
+        )
         user_role = UserRole(user_id=user.id, role=default_role)
         session.add(user_role)
 
     # Получаем актуальную роль из БД (для существующих пользователей)
-    role_result = await session.execute(
-        select(UserRole).where(UserRole.user_id == user.id)
-    )
+    role_result = await session.execute(select(UserRole).where(UserRole.user_id == user.id))
     role_row = role_result.scalar_one_or_none()
     role = role_row.role.value if role_row else RoleType.USER.value
 
@@ -106,9 +107,7 @@ async def me(
     session: AsyncSession = Depends(get_session),
 ):
     """Вернуть профиль текущего пользователя с ролью, контекстом модели и балансами."""
-    result = await session.execute(
-        select(UserWallet).where(UserWallet.user_id == current_user.id)
-    )
+    result = await session.execute(select(UserWallet).where(UserWallet.user_id == current_user.id))
     wallet = result.scalar_one_or_none()
 
     return MeResponse(

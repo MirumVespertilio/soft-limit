@@ -5,6 +5,7 @@
 - Media (слоты модели): тратит GEMS или Telegram Stars, выдаёт контент модели с
   редкостью; дубликаты конвертируются в GEMS.
 """
+
 import json
 import random
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.content import (
     ContentItem,
-    ContentItemMedia,
     ContentStatus,
     FileRole,
     MediaAsset,
@@ -31,7 +31,7 @@ from app.models.inventory import InventorySource, UserInventory
 from app.models.wallet import TransactionReason, TransactionResource
 from app.services.wallet import InsufficientBalanceError, adjust_balance, get_wallet_by_user_id
 from app.telegram import create_telegram_bot
-
+from app.utils.media import get_first_media_asset_id
 
 DEFAULT_RARITY_WEIGHTS: dict[Rarity, float] = {
     Rarity.RARE: 50,
@@ -64,10 +64,6 @@ class NoContentAvailable(SpinServiceError):
 
 
 class MediaSpinNotConfigured(SpinServiceError):
-    pass
-
-
-class DailyFreeSpinNotReady(SpinServiceError):
     pass
 
 
@@ -125,7 +121,9 @@ def weighted_segment_choice(segments: list[WheelSegment]) -> WheelSegment:
     return segments[-1]
 
 
-async def _find_existing_spin(session: AsyncSession, user_id: int, idempotency_key: str) -> Spin | None:
+async def _find_existing_spin(
+    session: AsyncSession, user_id: int, idempotency_key: str
+) -> Spin | None:
     result = await session.execute(
         select(Spin).where(
             Spin.user_id == user_id,
@@ -133,23 +131,6 @@ async def _find_existing_spin(session: AsyncSession, user_id: int, idempotency_k
         )
     )
     return result.scalar_one_or_none()
-
-
-async def _first_media_asset_id(
-    session: AsyncSession,
-    content_item_id: int,
-    role: FileRole,
-) -> int | None:
-    result = await session.execute(
-        select(ContentItemMedia.media_asset_id)
-        .where(
-            ContentItemMedia.content_item_id == content_item_id,
-            ContentItemMedia.role == role,
-        )
-        .order_by(ContentItemMedia.position)
-        .limit(1)
-    )
-    return result.scalars().first()
 
 
 async def build_spin_response(session: AsyncSession, spin: Spin) -> dict:
@@ -160,8 +141,8 @@ async def build_spin_response(session: AsyncSession, spin: Spin) -> dict:
     preview_media_id = None
     main_media_id = None
     if item is not None:
-        preview_media_id = await _first_media_asset_id(session, item.id, FileRole.PREVIEW)
-        main_media_id = await _first_media_asset_id(session, item.id, FileRole.MAIN)
+        preview_media_id = await get_first_media_asset_id(session, item.id, FileRole.PREVIEW)
+        main_media_id = await get_first_media_asset_id(session, item.id, FileRole.MAIN)
 
     return {
         "spin_id": spin.id,

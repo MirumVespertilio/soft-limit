@@ -4,6 +4,7 @@ Stars -> TON uses a fixed config rate (Telegram withdrawal pricing is stable
 enough for accounting). TON -> USD is fetched live from CoinGecko and cached in
 memory; on any failure the fallback constant is used.
 """
+
 import asyncio
 import logging
 import time
@@ -50,8 +51,9 @@ async def get_ton_usd_rate(session: httpx.AsyncClient | None = None) -> float:
                 globals()["_last_refresh"] = now
                 return rate
         except Exception as exc:
-            logger.warning("TON/USD rate fetch failed, using fallback %.2f: %s",
-                           settings.TON_USD_FALLBACK, exc)
+            logger.warning(
+                "TON/USD rate fetch failed, using fallback %.2f: %s", settings.TON_USD_FALLBACK, exc
+            )
         finally:
             if owned and session is not None:
                 await session.aclose()

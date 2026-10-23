@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test_token_for_tests")
 os.environ.setdefault("SECRET_KEY", "test_secret_key_for_tests")
 os.environ.setdefault("ADMIN_TELEGRAM_ID", "999999")
@@ -8,7 +9,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.content import ContentItem, ContentStatus, MediaType, ContentItemMedia, MediaAsset, FileRole
+from app.models.content import (
+    ContentItem,
+    ContentStatus,
+    MediaType,
+    ContentItemMedia,
+    MediaAsset,
+    FileRole,
+)
 from app.models.delivery import DeliveryStatus
 from app.models.wheel import Wheel, WheelSegment
 from app.models.spin import Spin
@@ -18,6 +26,7 @@ from tests.test_auth import generate_init_data
 
 async def _create_admin_user(client, session, engine) -> str:
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with async_session() as s:
         admin_tg_id = 999999
@@ -34,7 +43,11 @@ async def _create_content(session, title="Test Card", status=ContentStatus.PUBLI
 
 
 async def _create_wheel_with_segments(session, admin_client, token, content_ids):
-    wheels_response = await admin_client.post("/api/v1/admin/wheels", json={"name": "Test Wheel"}, headers={"Authorization": f"Bearer {token}"})
+    wheels_response = await admin_client.post(
+        "/api/v1/admin/wheels",
+        json={"name": "Test Wheel"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     wheel_id = wheels_response.json()["id"]
 
     for pos, cid in enumerate(content_ids):
@@ -49,7 +62,10 @@ async def _create_wheel_with_segments(session, admin_client, token, content_ids)
 async def test_add_segment_preserves_others(concurrent_client, concurrent_engine):
     client = concurrent_client
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async_session = async_sessionmaker(
+        concurrent_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async with async_session() as session:
         admin_token = await _create_admin_user(client, session, concurrent_engine)
@@ -91,7 +107,10 @@ async def test_delivery_status_values():
 
 async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async_session = async_sessionmaker(
+        concurrent_engine, class_=AsyncSession, expire_on_commit=False
+    )
     from unittest.mock import AsyncMock, patch, MagicMock
     import io
     from PIL import Image
@@ -140,11 +159,13 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
 
                 # Simulate legacy data produced by v2/v3: the same preview asset
                 # also had an ORIGINAL relation. Replacing the preview must clean it.
-                session.add(ContentItemMedia(
-                    content_item_id=cid,
-                    media_asset_id=old_preview_asset_id,
-                    role=FileRole.ORIGINAL,
-                ))
+                session.add(
+                    ContentItemMedia(
+                        content_item_id=cid,
+                        media_asset_id=old_preview_asset_id,
+                        role=FileRole.ORIGINAL,
+                    )
+                )
                 await session.commit()
 
                 r_replacement = await c.post(
@@ -206,7 +227,10 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
 
 async def test_wheel_rejects_unpublished_cards(concurrent_client, concurrent_engine):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async_session = async_sessionmaker(
+        concurrent_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async with async_session() as session:
         client = concurrent_client
@@ -230,12 +254,16 @@ async def test_wheel_rejects_unpublished_cards(concurrent_client, concurrent_eng
 
             response = await client.put(
                 f"/api/v1/admin/wheels/{wheel_id}/segments",
-                json={"segments": [{
-                    "content_item_id": content_id,
-                    "label": "Invalid",
-                    "weight": 1,
-                    "position": 2,
-                }]},
+                json={
+                    "segments": [
+                        {
+                            "content_item_id": content_id,
+                            "label": "Invalid",
+                            "weight": 1,
+                            "position": 2,
+                        }
+                    ]
+                },
                 headers=headers,
             )
             assert response.status_code == 400
@@ -290,8 +318,5 @@ async def test_publish_card_before_adding_to_wheel(concurrent_client, concurrent
 
         wheel_response = await client.get("/api/v1/wheel", headers=headers)
         assert wheel_response.status_code == 200, wheel_response.text
-        visible_ids = {
-            segment["content_item_id"]
-            for segment in wheel_response.json()["segments"]
-        }
+        visible_ids = {segment["content_item_id"] for segment in wheel_response.json()["segments"]}
         assert draft_id in visible_ids

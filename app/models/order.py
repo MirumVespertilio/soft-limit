@@ -29,9 +29,14 @@ class Order(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     amount: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(8), default="XTR")
-    status: Mapped[OrderStatus] = mapped_column(SAEnum(OrderStatus, values_callable=lambda x: [e.value for e in x]), default=OrderStatus.CREATED)
+    status: Mapped[OrderStatus] = mapped_column(
+        SAEnum(OrderStatus, values_callable=lambda x: [e.value for e in x]),
+        default=OrderStatus.CREATED,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class PaymentAttempt(Base):
@@ -39,7 +44,9 @@ class PaymentAttempt(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
-    provider: Mapped[PaymentProvider] = mapped_column(SAEnum(PaymentProvider, values_callable=lambda x: [e.value for e in x]))
+    provider: Mapped[PaymentProvider] = mapped_column(
+        SAEnum(PaymentProvider, values_callable=lambda x: [e.value for e in x])
+    )
     external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(32))
     amount: Mapped[int] = mapped_column(Integer)

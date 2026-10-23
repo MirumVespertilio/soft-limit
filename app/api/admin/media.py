@@ -64,7 +64,9 @@ async def upload_media(
 
     file_type = MediaType.PHOTO if is_image else MediaType.VIDEO
     if role == FileRole.PREVIEW and file_type != MediaType.PHOTO:
-        raise HTTPException(status_code=400, detail="Preview must be an image; upload a video as Main")
+        raise HTTPException(
+            status_code=400, detail="Preview must be an image; upload a video as Main"
+        )
 
     from app.config import settings
     from app.telegram import create_telegram_bot
@@ -176,18 +178,22 @@ async def upload_media(
                 ContentItemMedia.role == FileRole.PREVIEW,
             )
         )
-        session.add(ContentItemMedia(
-            content_item_id=content_item_id,
-            media_asset_id=asset.id,
-            role=FileRole.PREVIEW,
-            position=0,
-        ))
+        session.add(
+            ContentItemMedia(
+                content_item_id=content_item_id,
+                media_asset_id=asset.id,
+                role=FileRole.PREVIEW,
+                position=0,
+            )
+        )
     else:
-        session.add(ContentItemMedia(
-            content_item_id=content_item_id,
-            media_asset_id=asset.id,
-            role=FileRole.ORIGINAL,
-        ))
+        session.add(
+            ContentItemMedia(
+                content_item_id=content_item_id,
+                media_asset_id=asset.id,
+                role=FileRole.ORIGINAL,
+            )
+        )
         if role == FileRole.MAIN:
             await session.execute(
                 delete(ContentItemMedia).where(
@@ -195,19 +201,23 @@ async def upload_media(
                     ContentItemMedia.role == FileRole.MAIN,
                 )
             )
-            session.add(ContentItemMedia(
-                content_item_id=content_item_id,
-                media_asset_id=asset.id,
-                role=FileRole.MAIN,
-                position=0,
-            ))
+            session.add(
+                ContentItemMedia(
+                    content_item_id=content_item_id,
+                    media_asset_id=asset.id,
+                    role=FileRole.MAIN,
+                    position=0,
+                )
+            )
 
     if file_type == MediaType.PHOTO and prev_file_id and role != FileRole.PREVIEW:
         existing_preview = await session.execute(
-            select(ContentItemMedia.id).where(
+            select(ContentItemMedia.id)
+            .where(
                 ContentItemMedia.content_item_id == content_item_id,
                 ContentItemMedia.role == FileRole.PREVIEW,
-            ).limit(1)
+            )
+            .limit(1)
         )
         if not existing_preview.scalars().first():
             preview_asset = MediaAsset(

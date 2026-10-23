@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user_id
 from app.db import get_session
 from app.models.inventory import UserInventory
-from app.models.content import ContentItem, ContentItemMedia, FileRole
+from app.models.content import ContentItem, ContentItemMedia
+from app.utils.media import get_preview_media_id
 
 router = APIRouter(prefix="/api/v1", tags=["inventory"])
 
@@ -24,26 +25,20 @@ async def get_inventory(
 
     items = []
     for inv, item in result.all():
-        preview_result = await session.execute(
-            select(ContentItemMedia)
-            .where(
-                ContentItemMedia.content_item_id == item.id,
-                ContentItemMedia.role == FileRole.PREVIEW,
-            )
-            .order_by(ContentItemMedia.position)
+        preview_media_id = await get_preview_media_id(session, item.id)
+        items.append(
+            {
+                "inventory_id": inv.id,
+                "content_item_id": item.id,
+                "title": item.title,
+                "description": item.description,
+                "media_type": item.media_type.value,
+                "rarity": item.rarity.value,
+                "source": inv.source.value,
+                "preview_media_id": preview_media_id,
+                "acquired_at": inv.created_at.isoformat(),
+            }
         )
-        preview = preview_result.scalars().first()
-        items.append({
-            "inventory_id": inv.id,
-            "content_item_id": item.id,
-            "title": item.title,
-            "description": item.description,
-            "media_type": item.media_type.value,
-            "rarity": item.rarity.value,
-            "source": inv.source.value,
-            "preview_media_id": preview.media_asset_id if preview else None,
-            "acquired_at": inv.created_at.isoformat(),
-        })
 
     return {"items": items}
 
@@ -73,8 +68,7 @@ async def get_inventory_item(
         .order_by(ContentItemMedia.position)
     )
     media = [
-        {"media_id": m.media_asset_id, "role": m.role.value}
-        for m in media_result.scalars().all()
+        {"media_id": m.media_asset_id, "role": m.role.value} for m in media_result.scalars().all()
     ]
 
     return {

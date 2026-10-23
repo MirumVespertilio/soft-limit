@@ -3,6 +3,7 @@
 Принимает входящие события от Telegram Bot API по персональному URL модели:
 POST /api/v1/webhook/model/{model_id}
 """
+
 import logging
 from fastapi import APIRouter, HTTPException, Request, Response
 from aiogram.types import Update

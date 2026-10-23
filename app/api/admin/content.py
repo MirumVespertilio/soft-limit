@@ -6,8 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin
 from app.db import get_session
 from app.models.content import ContentItem, ContentStatus, MediaType, Rarity
-from app.models.content import ContentItemMedia, MediaAsset, FileRole
-from app.models.welcome import WelcomeRewardItem
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-content"])
 

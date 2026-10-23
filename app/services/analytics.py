@@ -3,6 +3,7 @@
 Collects revenue (GEMS / Telegram Stars / USD), spin counts by type,
 purchase conversion, duplicates and per-model breakdowns for /admin/stats.
 """
+
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -69,6 +70,7 @@ async def _purchase_totals(session, cutoff, model_id):
     spin_q = select(
         func.count().label("cnt"),
         func.coalesce(func.sum(SpinPurchase.price_gems), 0),
+        func.coalesce(func.sum(SpinPurchase.cost_stars), 0),
     )
     gem_q = select(
         func.count().label("cnt"),
@@ -84,6 +86,7 @@ async def _purchase_totals(session, cutoff, model_id):
     return {
         "spin_purchases": spin_row[0],
         "spin_purchase_gems": spin_row[1],
+        "spin_purchase_stars": spin_row[2],
         "gem_purchases": gem_row[0],
         "gem_purchase_stars": gem_row[1],
     }
@@ -97,12 +100,8 @@ async def _buyer_count(session, cutoff, model_id):
         spin_q = spin_q.where(SpinPurchase.model_id == model_id)
     spin_ids = await session.execute(spin_q)
     gem_ids = await session.execute(gem_q)
-    entries = [
-        (uid, created or datetime.now(timezone.utc))
-        for uid, created in spin_ids.all()
-    ] + [
-        (uid, created or datetime.now(timezone.utc))
-        for uid, created in gem_ids.all()
+    entries = [(uid, created or datetime.now(timezone.utc)) for uid, created in spin_ids.all()] + [
+        (uid, created or datetime.now(timezone.utc)) for uid, created in gem_ids.all()
     ]
     if cutoff is not None:
         entries = [e for e in entries if e[1] and e[1] >= cutoff]
@@ -124,7 +123,7 @@ async def _result_totals(session, cutoff, model_id):
     query = (
         select(
             func.count().label("results"),
-            func.sum(case((SpinResult.is_duplicate == True, 1), else_=0)).label("duplicates"),
+            func.sum(case((SpinResult.is_duplicate.is_(True), 1), else_=0)).label("duplicates"),
             func.coalesce(func.sum(SpinResult.reward_gems), 0).label("refunds"),
         )
         .select_from(SpinResult)
@@ -165,7 +164,7 @@ async def _per_model(session, cutoff):
             func.coalesce(func.sum(Spin.cost_gems), 0).label("gems"),
             func.coalesce(func.sum(Spin.cost_stars), 0).label("stars"),
         )
-        .where(Spin.model_id != None)
+        .where(Spin.model_id.is_not(None))
         .group_by(Spin.model_id, Spin.spin_type)
     )
     spin_purchase_q = (
@@ -173,8 +172,9 @@ async def _per_model(session, cutoff):
             SpinPurchase.model_id,
             func.count(),
             func.coalesce(func.sum(SpinPurchase.price_gems), 0),
+            func.coalesce(func.sum(SpinPurchase.cost_stars), 0),
         )
-        .where(SpinPurchase.model_id != None)
+        .where(SpinPurchase.model_id.is_not(None))
         .group_by(SpinPurchase.model_id)
     )
     if cutoff is not None:
@@ -188,34 +188,34 @@ async def _per_model(session, cutoff):
     names = {m_id: m_name for m_id, m_name in models_result.all()}
 
     per_model: dict[int, dict] = {}
+
+    def _entry(model_key) -> dict:
+        return per_model.setdefault(
+            model_key,
+            {
+                "model_id": model_key,
+                "model_name": names.get(model_key, f"Model #{model_key}"),
+                "spins": 0,
+                "spins_by_type": _empty_type_dict(),
+                "revenue_gems_spent": 0,
+                "revenue_stars": 0,
+                "spin_purchases": 0,
+            },
+        )
+
     for model_id, spin_type, count, gems, stars in spin_rows:
-        entry = per_model.setdefault(model_id, {
-            "model_id": model_id,
-            "model_name": names.get(model_id, f"Model #{model_id}"),
-            "spins": 0,
-            "spins_by_type": _empty_type_dict(),
-            "revenue_gems_spent": 0,
-            "revenue_stars": 0,
-            "spin_purchases": 0,
-        })
+        entry = _entry(model_id)
         entry["spins"] += count
         entry["spins_by_type"][
             spin_type.value if hasattr(spin_type, "value") else str(spin_type)
         ] += count
         entry["revenue_gems_spent"] += gems
         entry["revenue_stars"] += stars
-    for model_id, count, gems in purchase_rows:
-        entry = per_model.setdefault(model_id, {
-            "model_id": model_id,
-            "model_name": names.get(model_id, f"Model #{model_id}"),
-            "spins": 0,
-            "spins_by_type": _empty_type_dict(),
-            "revenue_gems_spent": 0,
-            "revenue_stars": 0,
-            "spin_purchases": 0,
-        })
+    for model_id, count, gems, purchase_stars in purchase_rows:
+        entry = _entry(model_id)
         entry["spin_purchases"] += count
         entry["revenue_gems_spent"] += gems
+        entry["revenue_stars"] += purchase_stars
 
     return sorted(per_model.values(), key=lambda e: e["spins"] + e["spin_purchases"], reverse=True)
 
@@ -240,6 +240,7 @@ async def _daily_series(session, model_id):
             func.date(SpinPurchase.created_at).label("day"),
             func.count(),
             func.coalesce(func.sum(SpinPurchase.price_gems), 0),
+            func.coalesce(func.sum(SpinPurchase.cost_stars), 0),
         )
         .where(SpinPurchase.created_at >= cutoff)
         .group_by("day")
@@ -274,7 +275,9 @@ async def _daily_series(session, model_id):
             "revenue_stars": 0,
             "revenue_usd": 0.0,
         }
-    rnd3 = lambda v: round(v, 3)
+
+    def rnd3(v: float) -> float:
+        return round(v, 3)
 
     for day, spin_type, count, gems, stars in spin_rows:
         key = str(day)
@@ -288,11 +291,13 @@ async def _daily_series(session, model_id):
         entry["revenue_gems_spent"] += gems
         entry["revenue_stars"] += stars
         entry["revenue_usd"] = rnd3(entry["revenue_usd"] + stars * stars_to_usd_factor)
-    for day, count, gems in sp_rows:
+    for day, count, gems, purchase_stars in sp_rows:
         entry = series.get(str(day))
         if entry is None:
             continue
         entry["revenue_gems_spent"] += gems
+        entry["revenue_stars"] += purchase_stars
+        entry["revenue_usd"] = rnd3(entry["revenue_usd"] + purchase_stars * stars_to_usd_factor)
     for day, stars in gp_rows:
         entry = series.get(str(day))
         if entry is None:
@@ -322,6 +327,7 @@ async def collect_admin_stats(
     gems_spent = sum(row[2] for row in spin_rows)
     stars_total = sum(row[3] for row in spin_rows)
     stars_total += purchase_totals["gem_purchase_stars"]
+    stars_total += purchase_totals["spin_purchase_stars"]
     gems_spent += purchase_totals["spin_purchase_gems"]
 
     usd_rate = await _stars_usd_factor()
@@ -342,7 +348,9 @@ async def collect_admin_stats(
         "model_id": model_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "usd_rate": {
-            "stars_per_usd_implied": round(1.0 / stars_to_usd_factor, 6) if stars_to_usd_factor else None,
+            "stars_per_usd_implied": (
+                round(1.0 / stars_to_usd_factor, 6) if stars_to_usd_factor else None
+            ),
             "ton_usd": round(usd_rate / _stars_per_ton(), 6) if _stars_per_ton() else None,
         },
         "totals": {
@@ -359,6 +367,7 @@ async def collect_admin_stats(
             },
             "revenue_by_type": {
                 "spin_packages_gems": purchase_totals["spin_purchase_gems"],
+                "spin_packages_stars": purchase_totals["spin_purchase_stars"],
                 "media_spins_gems": sum(row[2] for row in spin_rows),
                 "gem_packages_stars": purchase_totals["gem_purchase_stars"],
                 "media_spins_stars": sum(row[3] for row in spin_rows),

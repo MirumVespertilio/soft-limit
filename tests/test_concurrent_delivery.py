@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test_token_for_tests")
 os.environ.setdefault("SECRET_KEY", "test_secret_key_for_tests")
 os.environ.setdefault("ADMIN_TELEGRAM_ID", "999999")
@@ -12,7 +13,14 @@ from sqlalchemy import select
 
 from app.models.spin import Spin
 from app.models.inventory import UserInventory
-from app.models.content import ContentItem, ContentStatus, MediaType, ContentItemMedia, MediaAsset, FileRole
+from app.models.content import (
+    ContentItem,
+    ContentStatus,
+    MediaType,
+    ContentItemMedia,
+    MediaAsset,
+    FileRole,
+)
 from app.models.wheel import Wheel, WheelSegment
 from app.models.welcome import WelcomeRewardItem
 from tests.test_auth import generate_init_data
@@ -34,10 +42,16 @@ async def _setup_wheel(session):
     session.add(wheel)
     await session.flush()
 
-    session.add_all([
-        WheelSegment(wheel_id=wheel.id, content_item_id=item1.id, label="Prize 1", weight=1, position=0),
-        WheelSegment(wheel_id=wheel.id, content_item_id=item2.id, label="Prize 2", weight=1, position=1),
-    ])
+    session.add_all(
+        [
+            WheelSegment(
+                wheel_id=wheel.id, content_item_id=item1.id, label="Prize 1", weight=1, position=0
+            ),
+            WheelSegment(
+                wheel_id=wheel.id, content_item_id=item2.id, label="Prize 2", weight=1, position=1
+            ),
+        ]
+    )
     await session.commit()
     return item1.id
 
@@ -51,7 +65,9 @@ async def test_concurrent_delivery_single_send(mock_bot_cls, concurrent_client, 
 
     token = await _create_user(client, 888888)
 
-    async_session = async_sessionmaker(concurrent_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(
+        concurrent_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with async_session() as session:
         item_id = await _setup_wheel(session)
         session.add(WelcomeRewardItem(content_item_id=item_id))
@@ -67,10 +83,18 @@ async def test_concurrent_delivery_single_send(mock_bot_cls, concurrent_client, 
         session.add(asset)
         await session.flush()
 
-        session.add(ContentItemMedia(content_item_id=item_id, media_asset_id=asset.id, role=FileRole.ORIGINAL))
+        session.add(
+            ContentItemMedia(
+                content_item_id=item_id, media_asset_id=asset.id, role=FileRole.ORIGINAL
+            )
+        )
         await session.commit()
 
-    await client.post("/api/v1/spins", json={"idempotency_key": "d1"}, headers={"Authorization": f"Bearer {token}"})
+    await client.post(
+        "/api/v1/spins",
+        json={"idempotency_key": "d1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
     async with async_session() as session:
         inv = await session.execute(select(UserInventory))
@@ -84,7 +108,7 @@ async def test_concurrent_delivery_single_send(mock_bot_cls, concurrent_client, 
 
     responses = await asyncio.gather(*[do_deliver() for _ in range(3)], return_exceptions=True)
 
-    success_count = sum(1 for r in responses if hasattr(r, 'status_code') and r.status_code == 200)
+    success_count = sum(1 for r in responses if hasattr(r, "status_code") and r.status_code == 200)
     assert success_count == 3
 
     assert mock_bot.send_document.call_count == 1

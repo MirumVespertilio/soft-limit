@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin, require_admin, CurrentUser
@@ -8,36 +8,20 @@ from app.db import get_session
 from app.models.user import User
 from app.models.role import UserRole, RoleType
 from app.models.model import Model
-from app.models.wallet import UserWallet, TransactionResource, TransactionReason, GemPackage, GemPurchase
+from app.models.wallet import (
+    UserWallet,
+    TransactionResource,
+    TransactionReason,
+    GemPackage,
+)
 from app.models.spin import Spin
-from app.models.purchases import SpinPurchase
 from app.models.content import ContentItem, ContentStatus
 from app.models.wheel import Wheel, WheelSegment, RewardType
 from app.models.welcome import WelcomeRewardItem
 from app.models.purchases import SpinPackage
-from app.models.inventory import UserInventory
-from app.models.order import Order
-from app.services.wallet import adjust_balance, get_wallet_by_user_id
+from app.services.wallet import adjust_balance
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
-
-
-@router.get("/dashboard")
-async def dashboard(
-    admin_id: int = Depends(get_current_admin),
-    session: AsyncSession = Depends(get_session),
-):
-    users_count = await session.scalar(select(func.count()).select_from(User))
-    spins_count = await session.scalar(select(func.count()).select_from(Spin))
-    purchases_count = await session.scalar(select(func.count()).select_from(SpinPurchase))
-    inventory_count = await session.scalar(select(func.count()).select_from(UserInventory))
-
-    return {
-        "users": users_count or 0,
-        "spins": spins_count or 0,
-        "purchases": purchases_count or 0,
-        "inventory_items": inventory_count or 0,
-    }
 
 
 @router.get("/users")
@@ -49,7 +33,9 @@ async def list_users(
     query = select(User, UserWallet).join(UserWallet, isouter=True)
     if search:
         query = query.where(
-            User.telegram_id == int(search) if search.isdigit() else User.username.ilike(f"%{search}%")
+            User.telegram_id == int(search)
+            if search.isdigit()
+            else User.username.ilike(f"%{search}%")
         )
     result = await session.execute(query)
     users = result.all()
@@ -156,6 +142,7 @@ async def list_admin_packages(
                 "name": p.name,
                 "spins_count": p.spins_count,
                 "price_gems": p.price_gems,
+                "price_stars": p.price_stars,
                 "model_id": p.model_id,
                 "is_active": p.is_active,
                 "position": p.position,
@@ -169,6 +156,7 @@ class PackageCreateRequest(BaseModel):
     name: str
     spins_count: int
     price_gems: int
+    price_stars: int = 0
     model_id: int | None = None
     is_active: bool = True
     position: int = 0
@@ -194,6 +182,7 @@ class PackageUpdateRequest(BaseModel):
     name: str | None = None
     spins_count: int | None = None
     price_gems: int | None = None
+    price_stars: int | None = None
     model_id: int | None = None
     is_active: bool | None = None
     position: int | None = None
@@ -319,9 +308,7 @@ async def update_welcome_pool(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    wheel_result = await session.execute(
-        select(Wheel).where(Wheel.status == "active").limit(1)
-    )
+    wheel_result = await session.execute(select(Wheel).where(Wheel.status == "active").limit(1))
     wheel = wheel_result.scalars().first()
     if not wheel:
         raise HTTPException(status_code=400, detail="No active wheel")
@@ -331,7 +318,7 @@ async def update_welcome_pool(
         .join(ContentItem, WheelSegment.content_item_id == ContentItem.id)
         .where(
             WheelSegment.wheel_id == wheel.id,
-            WheelSegment.is_active == True,
+            WheelSegment.is_active.is_(True),
             ContentItem.status == ContentStatus.PUBLISHED,
         )
         .distinct()
@@ -507,7 +494,9 @@ async def update_wheel_segments(
     )
     used_segment_ids = {row[0] for row in used_result.all()}
 
-    provided_ids = [data.get("segment_id") for data in request.segments if data.get("segment_id") is not None]
+    provided_ids = [
+        data.get("segment_id") for data in request.segments if data.get("segment_id") is not None
+    ]
     if len(provided_ids) != len(set(provided_ids)):
         raise HTTPException(status_code=400, detail="Duplicate segment_id values")
 
@@ -572,9 +561,10 @@ async def update_wheel_segments(
     for seg_data in request.segments:
         blocker = reserved_positions.get(seg_data["position"])
         if blocker is not None and blocker != seg_data.get("segment_id"):
+            pos = seg_data["position"]
             raise HTTPException(
                 status_code=400,
-                detail=f"Position {seg_data['position']} is reserved by historical segment {blocker}",
+                detail=f"Position {pos} is reserved by historical segment {blocker}",
             )
 
     # Omitted rows: historical rows are retained (and deactivated); unused rows
@@ -584,7 +574,9 @@ async def update_wheel_segments(
             if seg_id in used_segment_ids:
                 if segment.is_active:
                     await session.execute(
-                        update(WheelSegment).where(WheelSegment.id == seg_id).values(is_active=False)
+                        update(WheelSegment)
+                        .where(WheelSegment.id == seg_id)
+                        .values(is_active=False)
                     )
             else:
                 await session.execute(
@@ -596,8 +588,7 @@ async def update_wheel_segments(
     editable_existing_ids = [
         seg_data["segment_id"]
         for seg_data in request.segments
-        if seg_data.get("segment_id") is not None
-        and seg_data["segment_id"] not in used_segment_ids
+        if seg_data.get("segment_id") is not None and seg_data["segment_id"] not in used_segment_ids
     ]
     all_positions = [segment.position for segment in existing_segments.values()] + positions + [0]
     temporary_position = max(all_positions) + len(existing_segments) + 10000
@@ -633,6 +624,7 @@ async def update_wheel_segments(
 
 class RoleAssignRequest(BaseModel):
     """Тело запроса для назначения/отзыва роли admin."""
+
     user_id: int
     role: str  # "user" | "admin"
 
@@ -663,9 +655,7 @@ async def assign_role(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Обновляем или создаём запись роли
-    role_result = await session.execute(
-        select(UserRole).where(UserRole.user_id == request.user_id)
-    )
+    role_result = await session.execute(select(UserRole).where(UserRole.user_id == request.user_id))
     role_row = role_result.scalar_one_or_none()
 
     if role_row:
@@ -685,6 +675,7 @@ async def assign_role(
 # ==============================================================================
 # Управление моделями (Multi-tenant SaaS)
 # ==============================================================================
+
 
 class ModelCreateRequest(BaseModel):
     name: str
@@ -723,9 +714,7 @@ async def list_models(
 ):
     """Список всех моделей, принадлежащих текущему владельцу (admin)."""
     result = await session.execute(
-        select(Model)
-        .where(Model.owner_user_id == current_user.id)
-        .order_by(Model.id.desc())
+        select(Model).where(Model.owner_user_id == current_user.id).order_by(Model.id.desc())
     )
     models = result.scalars().all()
     return {

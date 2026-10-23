@@ -1,8 +1,22 @@
 from app.models.user import User
 from app.models.role import UserRole, RoleType
 from app.models.model import Model
-from app.models.wallet import UserWallet, WalletTransaction, TransactionResource, TransactionReason, GemPackage, GemPurchase
-from app.models.content import MediaAsset, ContentItem, ContentItemMedia, FileRole, Rarity, RARITY_DUPLICATE_REWARD_GEMS
+from app.models.wallet import (
+    UserWallet,
+    WalletTransaction,
+    TransactionResource,
+    TransactionReason,
+    GemPackage,
+    GemPurchase,
+)
+from app.models.content import (
+    MediaAsset,
+    ContentItem,
+    ContentItemMedia,
+    FileRole,
+    Rarity,
+    RARITY_DUPLICATE_REWARD_GEMS,
+)
 from app.models.wheel import Wheel, WheelSegment, RewardType
 from app.models.welcome import WelcomeRewardItem
 from app.models.purchases import SpinPackage, SpinPurchase
