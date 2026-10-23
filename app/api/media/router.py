@@ -62,10 +62,9 @@ async def get_preview(
         if not item or item.status != ContentStatus.PUBLISHED:
             raise HTTPException(status_code=403, detail="Access denied")
 
-    from aiogram import Bot
-    from app.config import settings
+    from app.telegram import create_telegram_bot
 
-    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    bot = create_telegram_bot()
     try:
         file = await bot.get_file(asset.telegram_file_id)
         downloaded = await bot.download_file(file.file_path)

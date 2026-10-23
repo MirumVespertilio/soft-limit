@@ -125,22 +125,21 @@ async def adjust_user_balance(
     return {"transaction_id": tx.id, "amount": request.amount, "resource": request.resource.value}
 
 
-@router.get("/analytics/revenue")
-async def revenue_analytics(
+@router.get("/stats")
+async def admin_stats(
+    period: str = "all",
+    model_id: int | None = None,
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    total_gems_spent = await session.scalar(
-        select(func.coalesce(func.sum(SpinPurchase.price_gems), 0))
-    )
-    total_purchases = await session.scalar(select(func.count()).select_from(SpinPurchase))
+    """Агрегаты аналитики: выручка GEMS/Stars/USD, спины по типам, конверсия."""
+    from app.services.analytics import collect_admin_stats
 
-    return {
-        "real_revenue": 0,
-        "gems_spent": total_gems_spent or 0,
-        "total_purchases": total_purchases or 0,
-        "note": "gems expenditure data",
-    }
+    return await collect_admin_stats(
+        session,
+        period=period,
+        model_id=model_id,
+    )
 
 
 @router.get("/spin-packages")
@@ -157,6 +156,7 @@ async def list_admin_packages(
                 "name": p.name,
                 "spins_count": p.spins_count,
                 "price_gems": p.price_gems,
+                "model_id": p.model_id,
                 "is_active": p.is_active,
                 "position": p.position,
             }
@@ -169,6 +169,7 @@ class PackageCreateRequest(BaseModel):
     name: str
     spins_count: int
     price_gems: int
+    model_id: int | None = None
     is_active: bool = True
     position: int = 0
 
@@ -179,6 +180,10 @@ async def create_package(
     admin_id: int = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ):
+    if request.model_id is not None:
+        model = await session.get(Model, request.model_id)
+        if not model:
+            raise HTTPException(status_code=400, detail="Model not found")
     package = SpinPackage(**request.model_dump())
     session.add(package)
     await session.commit()
@@ -189,6 +194,7 @@ class PackageUpdateRequest(BaseModel):
     name: str | None = None
     spins_count: int | None = None
     price_gems: int | None = None
+    model_id: int | None = None
     is_active: bool | None = None
     position: int | None = None
 
@@ -203,6 +209,10 @@ async def update_package(
     package = await session.get(SpinPackage, package_id)
     if not package:
         raise HTTPException(status_code=404, detail="Package not found")
+    if request.model_id is not None:
+        model = await session.get(Model, request.model_id)
+        if not model:
+            raise HTTPException(status_code=400, detail="Model not found")
     for key, value in request.model_dump(exclude_unset=True).items():
         setattr(package, key, value)
     await session.commit()

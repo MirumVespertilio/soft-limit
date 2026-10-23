@@ -201,7 +201,7 @@ async def test_concurrent_purchase(client, session):
     assert len(purchases.scalars().all()) == 1
 
 
-@patch("aiogram.Bot")
+@patch("app.telegram.Bot")
 async def test_duplicate_delivery(mock_bot_cls, client, session):
     from app.models.content import MediaAsset, ContentItemMedia, FileRole
 
@@ -254,7 +254,7 @@ async def test_duplicate_delivery(mock_bot_cls, client, session):
     assert r2.status_code == 200
 
 
-@patch("aiogram.Bot")
+@patch("app.telegram.Bot")
 async def test_media_preview_unauthorized(mock_bot_cls, client, session):
     from app.models.content import MediaAsset, ContentItemMedia, FileRole
     from io import BytesIO

@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     APP_BASE_URL: str = ""
     TELEGRAM_PROXY_URL: str = ""
 
+    STARS_TO_TON_RATE: float = 0.0047
+    TON_USD_FALLBACK: float = 1.5
+    TON_USD_RATE_TTL: int = 300
+    TON_USD_API_TIMEOUT: int = 5
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if not self.TELEGRAM_BOT_TOKEN:

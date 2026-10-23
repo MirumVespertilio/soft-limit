@@ -108,7 +108,7 @@ async def test_media_roles_on_upload(concurrent_client, concurrent_engine):
         img.save(buf, format="JPEG")
         img_bytes = buf.getvalue()
 
-        with patch("aiogram.Bot") as mock_bot_cls:
+        with patch("app.telegram.Bot") as mock_bot_cls:
             mock_bot = AsyncMock()
             mock_bot.session = AsyncMock()
             mock_bot_cls.return_value = mock_bot

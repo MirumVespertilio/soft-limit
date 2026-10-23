@@ -18,7 +18,7 @@
             <section id="admin-section" class="section">
                 <div class="admin-tabs">
                     <button class="tab-btn active" data-tab="models">Модели</button>
-                    <button class="tab-btn" data-tab="dashboard">Дашборд</button>
+                    <button class="tab-btn" data-tab="stats">Статистика</button>
                     <button class="tab-btn" data-tab="content">Контент</button>
                     <button class="tab-btn" data-tab="wheel">Колесо</button>
                     <button class="tab-btn" data-tab="media">Медиа</button>
@@ -40,6 +40,7 @@
                 </div>
 
                 <div id="admin-dashboard" class="tab-content"></div>
+                <div id="admin-stats" class="tab-content"></div>
                 <div id="admin-content" class="tab-content"></div>
                 <div id="admin-wheel" class="tab-content"></div>
                 <div id="admin-media" class="tab-content"></div>
@@ -88,6 +89,7 @@
         </div>
     </div>
 
+    <script src="/static/admin/vendor/chart.umd.min.js"></script>
     <script src="/static/admin/app.js"></script>
 </body>
 </html>

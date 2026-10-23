@@ -42,7 +42,7 @@ async def _setup_wheel(session):
     return item1.id
 
 
-@patch("aiogram.Bot")
+@patch("app.telegram.Bot")
 async def test_concurrent_delivery_single_send(mock_bot_cls, concurrent_client, concurrent_engine):
     client = concurrent_client
     mock_bot = AsyncMock()

@@ -102,9 +102,10 @@ function initTabs() {
             }
 
             if (tabId === 'models') loadModels();
-            else if (tabId === 'dashboard') loadDashboard();
+            else if (tabId === 'stats') loadStats();
             else if (tabId === 'content') loadContent();
             else if (tabId === 'wheel') loadWheel();
+            else if (tabId === 'media') loadMedia();
             else if (tabId === 'welcome') loadWelcomePool();
             else if (tabId === 'users') loadUsers();
             else if (tabId === 'packages') loadPackages();
@@ -235,21 +236,148 @@ document.getElementById('model-form')?.addEventListener('submit', async (e) => {
     }
 });
 
-async function loadDashboard() {
-    const dashEl = document.getElementById('admin-dashboard');
-    dashEl.innerHTML = '<p class="loading-text">Загрузка дашборда...</p>';
+// ==============================================================================
+// Статистика / Аналитика
+// ==============================================================================
+
+let statsCharts = [];
+let statsModels = [];
+
+function destroyStatsCharts() {
+    statsCharts.forEach(c => { try { c.destroy(); } catch (_) {} });
+    statsCharts = [];
+}
+
+function fmtUsd(v) {
+    return '$' + Number(v || 0).toFixed(3).replace(/\.?0+$/, '') ;
+}
+
+function renderStatsCharts(daily) {
+    destroyStatsCharts();
+    const labels = daily.map(d => d.date.slice(5));
+    const usdData = daily.map(d => d.revenue_usd);
+    const typeLabels = { welcome: 'Welcome', standard: 'Standard', bonus: 'Колесо', media: 'Медиа' };
+
+    const usdCtx = document.getElementById('chart-revenue');
+    if (usdCtx) {
+        statsCharts.push(new Chart(usdCtx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Выручка, USD',
+                    data: usdData,
+                    borderColor: '#ff007f',
+                    backgroundColor: 'rgba(255,0,127,0.12)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { x: { ticks: { color: 'rgba(255,255,255,0.55)' } }, y: { ticks: { color: 'rgba(255,255,255,0.55)' }, beginAtZero: true } },
+                plugins: { legend: { labels: { color: 'rgba(255,255,255,0.8)' } } },
+            },
+        }));
+    }
+
+    const spinsCtx = document.getElementById('chart-spins');
+    if (spinsCtx) {
+        const datasets = ['welcome', 'standard', 'bonus', 'media'].map(type => ({
+            label: typeLabels[type],
+            data: daily.map(d => (d.spins_by_type || {})[type] || 0),
+            borderWidth: 1,
+        }));
+        statsCharts.push(new Chart(spinsCtx, {
+            type: 'bar',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { x: { stacked: true, ticks: { color: 'rgba(255,255,255,0.55)' } }, y: { stacked: true, ticks: { color: 'rgba(255,255,255,0.55)' }, beginAtZero: true, precision: 0 } },
+                plugins: { legend: { labels: { color: 'rgba(255,255,255,0.8)' } } },
+            },
+        }));
+    }
+}
+
+async function loadStats() {
+    const el = document.getElementById('admin-stats');
+    el.innerHTML = '<p class="loading-text">Загрузка статистики...</p>';
     try {
-        const res = await api('/admin/dashboard');
-        const data = await res.json();
-        dashEl.innerHTML = `
-            <div class="glass-panel" style="padding: 16px;">
-                <p>Пользователей: <b>${data.users}</b></p>
-                <p>Всего спинов: <b>${data.spins}</b></p>
-                <p>Покупок: <b>${data.purchases}</b></p>
+        const params = new URLSearchParams();
+        const period = document.getElementById('stats-period')?.value || 'all';
+        const modelSel = document.getElementById('stats-model');
+        params.set('period', period);
+        if (modelSel && modelSel.value) params.set('model_id', modelSel.value);
+
+        const [statsRes, modelsRes] = await Promise.all([
+            api(`/admin/stats?${params.toString()}`),
+            api('/admin/models'),
+        ]);
+        const data = await statsRes.json();
+        statsModels = (await modelsRes.json()).models || [];
+        const t = data.totals || {};
+        const options = `<option value="">Все модели</option>` + statsModels.map(m =>
+            `<option value="${m.id}" ${data.model_id === m.id ? 'selected' : ''}>${escapeHtml(m.name)} (#${m.id})</option>`
+        ).join('');
+
+        el.innerHTML = `
+            <div class="glass-panel stats-panel">
+                <div class="stats-controls">
+                    <select id="stats-period" class="input">
+                        <option value="day" ${period === 'day' ? 'selected' : ''}>Сутки</option>
+                        <option value="week" ${period === 'week' ? 'selected' : ''}>Неделя</option>
+                        <option value="month" ${period === 'month' ? 'selected' : ''}>Месяц</option>
+                        <option value="all" ${period === 'all' ? 'selected' : ''}>Всё время</option>
+                    </select>
+                    <select id="stats-model" class="input">${options}</select>
+                    <button id="stats-refresh" class="btn btn-primary btn-sm">Обновить</button>
+                </div>
+                <div class="stat-cards">
+                    <div class="stat-card"><div class="stat-value">${fmtUsd(t.revenue_usd)}</div><div class="stat-label">Выручка (USD)</div></div>
+                    <div class="stat-card"><div class="stat-value">${t.revenue_gems_spent ?? 0}</div><div class="stat-label">GEMS потрачено</div></div>
+                    <div class="stat-card"><div class="stat-value">${t.revenue_stars ?? 0} ⭐</div><div class="stat-label">Telegram Stars</div></div>
+                    <div class="stat-card"><div class="stat-value">${t.users_total ?? 0} (+${t.users_new ?? 0})</div><div class="stat-label">Пользователи</div></div>
+                    <div class="stat-card"><div class="stat-value">${((t.conversion_rate || 0) * 100).toFixed(2)}%</div><div class="stat-label">Конверсия покупок</div></div>
+                    <div class="stat-card"><div class="stat-value">${t.purchases_total ?? 0}</div><div class="stat-label">Покупок всего</div></div>
+                    <div class="stat-card"><div class="stat-value">${t.spins_total ?? 0}</div><div class="stat-label">Спинов всего</div></div>
+                    <div class="stat-card"><div class="stat-value">${t.duplicates ?? 0}</div><div class="stat-label">Дубликаты</div></div>
+                </div>
+                <div class="stat-breakdown">
+                    ${Object.entries(t.spins_by_type || {}).map(([k, v]) => `<span class="no-bot-tag">${k}: ${v}</span>`).join(' ')}
+                </div>
+            </div>
+            <div class="glass-panel stats-panel">
+                <h3>Выручка (USD) за 30 дней</h3>
+                <div class="chart-wrap"><canvas id="chart-revenue"></canvas></div>
+            </div>
+            <div class="glass-panel stats-panel">
+                <h3>Спины по типам за 30 дней</h3>
+                <div class="chart-wrap"><canvas id="chart-spins"></canvas></div>
+            </div>
+            <div class="glass-panel stats-panel">
+                <h3>По моделям</h3>
+                <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
+                    ${(data.per_model || []).map(m => `
+                        <div class="model-stats-row">
+                            <span><b>${escapeHtml(m.model_name)}</b></span>
+                            <span>${m.spins} спинов • ${m.spin_purchases} покупок • 💎${m.revenue_gems_spent} • ${fmtUsd(m.revenue_usd)}</span>
+                        </div>
+                    `).join('') || '<p class="loading-text">Нет данных по моделям</p>'}
+                </div>
             </div>
         `;
+
+        renderStatsCharts(data.daily || []);
+
+        document.getElementById('stats-refresh').addEventListener('click', () => loadStats());
+        document.getElementById('stats-period').addEventListener('change', () => loadStats());
+        document.getElementById('stats-model').addEventListener('change', () => loadStats());
     } catch (e) {
-        dashEl.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
+        el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
     }
 }
 
@@ -358,6 +486,77 @@ async function loadWheel() {
                 body: JSON.stringify({ name, model_id: model_id ? parseInt(model_id, 10) : null }),
             });
             loadWheel();
+        });
+    } catch (e) {
+        el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;
+    }
+}
+
+// ==============================================================================
+// Медиа
+// ==============================================================================
+
+async function loadMedia() {
+    const el = document.getElementById('admin-media');
+    el.innerHTML = '<p class="loading-text">Загрузка медиа...</p>';
+    try {
+        const [mediaRes, contentRes] = await Promise.all([
+            api('/admin/media'),
+            api('/admin/content'),
+        ]);
+        const media = await mediaRes.json();
+        const content = (await contentRes.json()).items || [];
+        const contentOptions = content.map(c => `<option value="${c.id}">${escapeHtml(c.title)} (#${c.id})</option>`).join('');
+
+        el.innerHTML = `
+            <div class="glass-panel" style="padding: 16px;">
+                <h3>Загрузка медиа</h3>
+                <form id="media-upload-form" style="display:flex; flex-direction:column; gap:8px; margin:12px 0;">
+                    <select id="media-content" class="input" required>
+                        <option value="">Выберите контент</option>${contentOptions}
+                    </select>
+                    <select id="media-role" class="input">
+                        <option value="preview">Preview</option>
+                        <option value="main">Main</option>
+                    </select>
+                    <input type="file" id="media-file" class="input" accept="image/jpeg,image/png,image/webp,video/mp4" required>
+                    <button type="submit" class="btn btn-primary btn-sm">Загрузить</button>
+                </form>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${(media.items || []).map(a => `
+                        <div style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid var(--border-glass)">
+                            <span>#${a.id} ${escapeHtml(a.file_name || '')}</span>
+                            <span>${a.file_type} • ${(a.file_size / 1024).toFixed(0)} KB</span>
+                        </div>
+                    `).join('') || '<p class="loading-text">Нет загруженных медиа</p>'}
+                </div>
+            </div>
+        `;
+
+        document.getElementById('media-upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const contentId = document.getElementById('media-content').value;
+            const role = document.getElementById('media-role').value;
+            const fileInput = document.getElementById('media-file');
+            if (!contentId || !fileInput.files.length) {
+                alert('Выберите контент и файл');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('content_item_id', contentId);
+            formData.append('role', role);
+            const response = await fetch('/api/v1/admin/media/upload', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData,
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                alert('Ошибка загрузки: ' + (err.detail || response.status));
+                return;
+            }
+            loadMedia();
         });
     } catch (e) {
         el.innerHTML = `<p class="loading-text" style="color: var(--danger)">Ошибка: ${e.message}</p>`;

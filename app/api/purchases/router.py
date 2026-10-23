@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.types import LabeledPrice
 
-from app.api.deps import get_current_user_id
+from app.api.deps import get_current_user, get_current_user_id, CurrentUser
 from app.db import get_session
 from app.models.purchases import SpinPackage, SpinPurchase
 from app.models.wallet import GemPackage, GemPurchase, TransactionResource, TransactionReason
@@ -20,12 +20,15 @@ router = APIRouter(prefix="/api/v1", tags=["purchases"])
 
 @router.get("/spin-packages")
 async def list_spin_packages(
-    user_id: int = Depends(get_current_user_id),
+    current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
-        select(SpinPackage).where(SpinPackage.is_active == True).order_by(SpinPackage.position)
-    )
+    query = select(SpinPackage).where(SpinPackage.is_active == True)
+    if current_user.model_id is not None:
+        query = query.where(
+            (SpinPackage.model_id == None) | (SpinPackage.model_id == current_user.model_id)
+        )
+    result = await session.execute(query.order_by(SpinPackage.position))
     packages = result.scalars().all()
     return {
         "packages": [
@@ -34,6 +37,7 @@ async def list_spin_packages(
                 "name": p.name,
                 "spins_count": p.spins_count,
                 "price_gems": p.price_gems,
+                "model_id": p.model_id,
             }
             for p in packages
         ]
@@ -54,9 +58,10 @@ class SpinPurchaseResponse(BaseModel):
 @router.post("/spin-purchases", response_model=SpinPurchaseResponse)
 async def purchase_spin_package(
     request: SpinPurchaseRequest,
-    user_id: int = Depends(get_current_user_id),
+    current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    user_id = current_user.id
     idem_key = request.idempotency_key
 
     existing = await session.execute(
@@ -75,6 +80,8 @@ async def purchase_spin_package(
 
     package = await session.get(SpinPackage, request.package_id)
     if not package or not package.is_active:
+        raise HTTPException(status_code=404, detail="Package not found")
+    if package.model_id is not None and package.model_id != current_user.model_id:
         raise HTTPException(status_code=404, detail="Package not found")
 
     try:
@@ -102,6 +109,7 @@ async def purchase_spin_package(
         package_id=package.id,
         price_gems=package.price_gems,
         spins_added=package.spins_count,
+        model_id=package.model_id,
         idempotency_key=idem_key,
     )
     session.add(purchase)

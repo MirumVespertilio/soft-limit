@@ -113,7 +113,7 @@ async def test_real_concurrent_purchases(concurrent_client, concurrent_engine):
     assert success_count == 1
 
 
-@patch("aiogram.Bot")
+@patch("app.telegram.Bot")
 async def test_delivery_bot_called_once(mock_bot_cls, concurrent_client, concurrent_engine):
     client = concurrent_client
     mock_bot = AsyncMock()
